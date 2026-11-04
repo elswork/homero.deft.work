@@ -1,0 +1,26 @@
+name: "Homero — Generador de Libros Interactivos y Audiolibros"
+description: "Compila capítulos en Markdown a Web con Karaoke a la inversa (Read-Along), Audiolibro MP3, EPUB y PDF."
+author: "Eloy López Sánchez"
+inputs:
+  book_dir:
+    description: "Directorio raíz del libro (donde se encuentra libro.yaml)"
+    required: false
+    default: "."
+runs:
+  using: "composite"
+  steps:
+    - name: Configurar Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+    - name: Instalar dependencias de Homero
+      shell: bash
+      run: |
+        pip install edge-tts PyYAML fpdf2
+    - name: Ejecutar compilador Homero
+      shell: bash
+      run: |
+        python3 ${{ github.action_path }}/homero.py build --book-dir "${{ inputs.book_dir }}"
+branding:
+  icon: "book-open"
+  color: "blue"
