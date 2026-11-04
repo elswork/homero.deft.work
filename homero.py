@@ -64,9 +64,16 @@ def format_word_html(raw_token: str, w_id: int, s_id: int) -> str:
     return f'<span class="hm-word" id="w-{w_id}" data-w="{w_id}" data-s="{s_id}">{display}</span>'
 
 
-def compile_markdown_for_karaoke(md_body: str, chapter_title: str, chapter_subtitle: str):
+def compile_markdown_for_karaoke(
+    md_body: str,
+    chapter_num: int,
+    chapter_title: str,
+    chapter_subtitle: str,
+    author: str,
+    lang: str,
+):
     """
-    Convierte el cuerpo Markdown en:
+    Convierte el título, subtítulo, autoría y cuerpo Markdown en:
     - HTML interactivo con frases (.hm-sentence) y palabras (.hm-word) numeradas
     - Lista de frases y palabras para alinear con el motor TTS
     - Lista de bloques limpios para EPUB y PDF
@@ -180,8 +187,22 @@ def compile_markdown_for_karaoke(md_body: str, chapter_title: str, chapter_subti
         inner_html = " ".join(word_spans)
         return f'<span class="hm-sentence" id="s-{s_id}" data-s="{s_id}">{inner_html}</span>'
 
-    # Incluir título y subtítulo como frase 0 y frase 1 narradas o empezar desde el cuerpo:
-    # Empezamos en el cuerpo del relato para que el lector vea iluminarse directamente el primer párrafo.
+    # 1. El audiolibro y el karaoke comienzan con el Título del capítulo
+    prefix_cap = f"Capítulo {chapter_num}: " if lang == "es" else f"Chapter {chapter_num}: "
+    title_full = f"{prefix_cap}{chapter_title}"
+    title_html = register_sentence(title_full)
+
+    # 2. Subtítulo explicativo
+    subtitle_html = ""
+    if chapter_subtitle:
+        sub_sents = split_into_sentences(chapter_subtitle)
+        subtitle_html = " ".join(register_sentence(st) for st in sub_sents)
+
+    # 3. Datos adicionales de autoría
+    author_prefix = f"Por {author}." if lang == "es" else f"By {author}."
+    author_html = register_sentence(author_prefix)
+
+    # 4. Cuerpo de párrafos, listas y encabezados
     for btype, bcontent in blocks:
         if btype == "hr":
             html_parts.append('<hr class="chapter-divider">')
@@ -206,7 +227,7 @@ def compile_markdown_for_karaoke(md_body: str, chapter_title: str, chapter_subti
             html_parts.append(f"<p>{' '.join(rendered_sents)}</p>")
             clean_blocks.append(("p", clean_inline_markdown_to_plain(bcontent)))
 
-    return "\n".join(html_parts), sentences_meta, words_meta, clean_blocks
+    return title_html, subtitle_html, author_html, "\n".join(html_parts), sentences_meta, words_meta, clean_blocks
 
 
 async def synthesize_and_align(
@@ -538,8 +559,11 @@ async def build_book(book_dir: Path, force_tts: bool = False):
             ch_subtitle = meta.get("subtitulo", "")
             reading_time = meta.get("tiempo_lectura", "4 min")
 
-            html_body, s_meta, w_meta, clean_blocks = compile_markdown_for_karaoke(
-                body, ch_title, ch_subtitle
+            author_name = book_cfg["libro"]["autor"]
+            title_html, subtitle_html, author_html, html_body, s_meta, w_meta, clean_blocks = (
+                compile_markdown_for_karaoke(
+                    body, ch_num, ch_title, ch_subtitle, author_name, lang
+                )
             )
 
             mp3_rel = f"audio/{lang}/{slug}.mp3"
@@ -562,7 +586,10 @@ async def build_book(book_dir: Path, force_tts: bool = False):
                 "capitulo": ch_num,
                 "slug": slug,
                 "title": ch_title,
+                "title_html": title_html,
                 "subtitle": ch_subtitle,
+                "subtitle_html": subtitle_html,
+                "author_html": author_html,
                 "reading_time": reading_time,
                 "audio_url": mp3_rel,
                 "duration": sync_data["duration"],
@@ -617,3 +644,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
