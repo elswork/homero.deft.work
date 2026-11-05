@@ -29,3 +29,4 @@ WORKDIR /book
 
 ENTRYPOINT ["python3", "/app/homero.py"]
 CMD ["build", "--book-dir", "/book", "--translate"]
+
