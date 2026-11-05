@@ -1,11 +1,19 @@
 name: "Homero — Generador de Libros Interactivos y Audiolibros"
-description: "Compila capítulos en Markdown a Web con Karaoke a la inversa (Read-Along), Audiolibro MP3, EPUB y PDF."
+description: "Auto-traduce capítulos Markdown a múltiples idiomas, genera audiolibros neuronales Edge-TTS, karaoke sincronizado, EPUB y PDF."
 author: "Eloy López Sánchez"
 inputs:
   book_dir:
     description: "Directorio raíz del libro (donde se encuentra libro.yaml)"
     required: false
     default: "."
+  translate:
+    description: "Traducir automáticamente capítulos faltantes o modificados desde el idioma fuente"
+    required: false
+    default: "true"
+  source_lang:
+    description: "Idioma maestro fuente"
+    required: false
+    default: "es"
 runs:
   using: "composite"
   steps:
@@ -13,15 +21,27 @@ runs:
       uses: actions/setup-python@v5
       with:
         python-version: "3.11"
+        cache: "pip"
+
+    - name: Instalar fuentes del sistema
+      shell: bash
+      run: |
+        sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
+
     - name: Instalar dependencias de Homero
       shell: bash
       run: |
-        pip install edge-tts PyYAML fpdf2
-    - name: Ejecutar compilador Homero
+        pip install -r ${{ github.action_path }}/requirements.txt
+
+    - name: Ejecutar compilador y traductor Homero
       shell: bash
       run: |
-        python3 ${{ github.action_path }}/homero.py build --book-dir "${{ inputs.book_dir }}"
+        EXTRA_ARGS=""
+        if [ "${{ inputs.translate }}" = "true" ]; then
+          EXTRA_ARGS="--translate --source-lang ${{ inputs.source_lang }}"
+        fi
+        python3 ${{ github.action_path }}/homero.py build --book-dir "${{ inputs.book_dir }}" $EXTRA_ARGS
+
 branding:
   icon: "book-open"
   color: "blue"
-

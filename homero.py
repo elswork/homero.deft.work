@@ -12,6 +12,8 @@ import html
 import json
 import os
 import re
+import urllib.parse
+import urllib.request
 import uuid
 import zipfile
 from pathlib import Path
@@ -19,6 +21,152 @@ from pathlib import Path
 import edge_tts
 import yaml
 from fpdf import FPDF
+
+
+LANG_MAP = {
+    "zh": "zh-CN",
+    "en": "en",
+    "hi": "hi",
+    "ar": "ar",
+    "fr": "fr",
+    "ru": "ru",
+    "pt": "pt",
+    "es": "es",
+}
+
+
+def translate_text(text: str, sl: str = "es", tl: str = "en") -> str:
+    """Traduce texto plano preservando saltos de línea."""
+    if not text or not text.strip():
+        return text
+    target = LANG_MAP.get(tl, tl)
+    source = LANG_MAP.get(sl, sl)
+    if source == target:
+        return text
+    url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl={source}&tl={target}&dt=t&q={urllib.parse.quote(text)}"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+    with urllib.request.urlopen(req, timeout=25) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+        return "".join([part[0] for part in data[0] if part[0]])
+
+
+def translate_markdown_file(source_content: str, sl: str, tl: str) -> str:
+    """
+    Traduce un archivo Markdown completo preservando frontmatter YAML y sintaxis.
+    """
+    fm_match = re.match(r"^---\n(.*?)\n---\n(.*)$", source_content, re.DOTALL)
+    if not fm_match:
+        return translate_text(source_content, sl, tl)
+
+    fm_raw, body = fm_match.groups()
+    source_hash = hashlib.sha256(source_content.encode("utf-8")).hexdigest()[:16]
+
+    out_fm_lines = []
+    has_source_hash = False
+    for line in fm_raw.splitlines():
+        if line.startswith("titulo:"):
+            val = line.split("titulo:", 1)[1].strip().strip("\"'")
+            tr_val = translate_text(val, sl, tl).replace('"', '\\"')
+            out_fm_lines.append(f'titulo: "{tr_val}"')
+        elif line.startswith("subtitulo:"):
+            val = line.split("subtitulo:", 1)[1].strip().strip("\"'")
+            tr_val = translate_text(val, sl, tl).replace('"', '\\"')
+            out_fm_lines.append(f'subtitulo: "{tr_val}"')
+        elif line.startswith("fuente_hash:"):
+            out_fm_lines.append(f'fuente_hash: "{source_hash}"')
+            has_source_hash = True
+        else:
+            out_fm_lines.append(line)
+
+    if not has_source_hash:
+        out_fm_lines.append(f'fuente_hash: "{source_hash}"')
+
+    paras = body.split("\n\n")
+    tr_paras = []
+    for p in paras:
+        p_strip = p.strip()
+        if not p_strip:
+            continue
+        if p_strip.startswith("## "):
+            h_text = p_strip[3:].strip()
+            tr_paras.append(f"## {translate_text(h_text, sl, tl)}")
+        elif p_strip.startswith("### "):
+            h_text = p_strip[4:].strip()
+            tr_paras.append(f"### {translate_text(h_text, sl, tl)}")
+        elif p_strip.startswith("> "):
+            q_text = p_strip[2:].strip()
+            tr_paras.append(f"> {translate_text(q_text, sl, tl)}")
+        elif p_strip.startswith("---") or p_strip.startswith("***"):
+            tr_paras.append(p_strip)
+        else:
+            lines = p_strip.splitlines()
+            if any(re.match(r"^\d+\.\s+", l) for l in lines):
+                tr_lines = []
+                for l in lines:
+                    m = re.match(r"^(\d+\.\s+)(.*)$", l)
+                    if m:
+                        tr_lines.append(f"{m.group(1)}{translate_text(m.group(2), sl, tl)}")
+                    else:
+                        tr_lines.append(translate_text(l, sl, tl))
+                tr_paras.append("\n".join(tr_lines))
+            else:
+                tr_paras.append(translate_text(p_strip, sl, tl))
+
+    new_fm = "---\n" + "\n".join(out_fm_lines) + "\n---\n\n"
+    return new_fm + "\n\n".join(tr_paras) + "\n"
+
+
+def auto_translate_book(book_dir: Path, source_lang: str = "es"):
+    """
+    Traduce automáticamente los capítulos desde el idioma fuente a todos los idiomas
+    definidos en libro.yaml si no existen o si el archivo fuente ha cambiado.
+    """
+    cfg_path = book_dir / "libro.yaml"
+    if not cfg_path.exists():
+        raise FileNotFoundError(f"No se encontró {cfg_path}")
+
+    book_cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    idiomas_cfg = book_cfg.get("idiomas", {})
+
+    source_dir = book_dir / "capitulos" / source_lang
+    if not source_dir.exists():
+        print(f"[TRADUCCIÓN] Directorio fuente {source_dir} no existe.")
+        return
+
+    source_files = sorted(source_dir.glob("*.md"))
+    if not source_files:
+        print(f"[TRADUCCIÓN] No hay capítulos en {source_dir}.")
+        return
+
+    for target_lang, linfo in idiomas_cfg.items():
+        if target_lang == source_lang:
+            continue
+
+        target_dir = book_dir / "capitulos" / target_lang
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"\n[TRADUCCIÓN] Sincronizando idioma [{target_lang.upper()}] ({linfo.get('nombre', target_lang)})...")
+        for s_file in source_files:
+            t_file = target_dir / s_file.name
+            s_content = s_file.read_text(encoding="utf-8")
+            s_hash = hashlib.sha256(s_content.encode("utf-8")).hexdigest()[:16]
+
+            needs_trans = True
+            if t_file.exists():
+                try:
+                    t_content = t_file.read_text(encoding="utf-8")
+                    t_meta, _ = parse_frontmatter_and_body(t_content)
+                    if t_meta.get("fuente_hash") == s_hash:
+                        needs_trans = False
+                except Exception:
+                    pass
+
+            if needs_trans:
+                print(f"  -> Traduciendo {s_file.name} ({source_lang} -> {target_lang})...")
+                translated_md = translate_markdown_file(s_content, source_lang, target_lang)
+                t_file.write_text(translated_md, encoding="utf-8")
+            else:
+                print(f"  -> {s_file.name} [{target_lang}] actualizado (caché OK).")
 
 
 def normalize_word(w: str) -> str:
@@ -50,7 +198,7 @@ def clean_inline_markdown_to_plain(text: str) -> str:
 
 def split_into_sentences(text: str):
     """Divide un párrafo en frases manteniendo signos de puntuación."""
-    parts = re.split(r"(?<=[.?!:;])\s+", text.strip())
+    parts = re.split(r"(?<=[.?!])\s+", text.strip())
     return [p.strip() for p in parts if p.strip()]
 
 
@@ -523,10 +671,18 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
     print(f"  [PDF]  Generado -> {out_path.name}")
 
 
-async def build_book(book_dir: Path, force_tts: bool = False):
+async def build_book(
+    book_dir: Path,
+    force_tts: bool = False,
+    translate: bool = False,
+    source_lang: str = "es",
+):
     cfg_path = book_dir / "libro.yaml"
     if not cfg_path.exists():
         raise FileNotFoundError(f"No se encontró {cfg_path}")
+
+    if translate:
+        auto_translate_book(book_dir, source_lang=source_lang)
 
     book_cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     idiomas_cfg = book_cfg.get("idiomas", {})
@@ -551,7 +707,6 @@ async def build_book(book_dir: Path, force_tts: bool = False):
 
         for md_file in md_files:
             raw_md = md_file.read_text(encoding="utf-8")
-            text_hash = hashlib.sha256(raw_md.encode("utf-8")).hexdigest()[:16]
             meta, body = parse_frontmatter_and_body(raw_md)
             slug = md_file.stem
             ch_num = meta.get("capitulo", 1)
@@ -565,6 +720,9 @@ async def build_book(book_dir: Path, force_tts: bool = False):
                     body, ch_num, ch_title, ch_subtitle, author_name, lang
                 )
             )
+
+            spoken_text = " ".join(s["text"] for s in s_meta)
+            text_hash = hashlib.sha256(f"{linfo['voz_tts']}::{spoken_text}".encode("utf-8")).hexdigest()[:16]
 
             mp3_rel = f"audio/{lang}/{slug}.mp3"
             sync_rel = f"audio/{lang}/{slug}.sync.json"
@@ -631,13 +789,29 @@ async def build_book(book_dir: Path, force_tts: bool = False):
 def main():
     parser = argparse.ArgumentParser(description="Homero — Compilador de libros interactivos y audiolibros")
     sub = parser.add_subparsers(dest="cmd")
+
+    # Comando build
     b_parser = sub.add_parser("build", help="Compila los capítulos Markdown, el audiolibro y los formatos descargables")
     b_parser.add_argument("--book-dir", default=".", help="Ruta al directorio del libro")
     b_parser.add_argument("--force-tts", action="store_true", help="Regenerar audios aunque no haya cambiado el texto")
+    b_parser.add_argument("--translate", action="store_true", help="Auto-traducir capítulos ausentes o modificados antes de compilar")
+    b_parser.add_argument("--source-lang", default="es", help="Idioma maestro fuente (por defecto: es)")
+
+    # Comando translate
+    t_parser = sub.add_parser("translate", help="Auto-traduce capítulos desde el idioma fuente a los idiomas de libro.yaml")
+    t_parser.add_argument("--book-dir", default=".", help="Ruta al directorio del libro")
+    t_parser.add_argument("--source-lang", default="es", help="Idioma maestro fuente (por defecto: es)")
 
     args = parser.parse_args()
     if args.cmd == "build":
-        asyncio.run(build_book(Path(args.book_dir).resolve(), force_tts=args.force_tts))
+        asyncio.run(build_book(
+            Path(args.book_dir).resolve(),
+            force_tts=args.force_tts,
+            translate=args.translate,
+            source_lang=args.source_lang,
+        ))
+    elif args.cmd == "translate":
+        auto_translate_book(Path(args.book_dir).resolve(), source_lang=args.source_lang)
     else:
         parser.print_help()
 
