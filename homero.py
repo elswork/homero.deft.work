@@ -436,36 +436,64 @@ async def synthesize_and_align(
             else:
                 print(f"  [ERROR TTS] No se pudo generar audio para {mp3_path.name}: {err}")
 
-    # Alineación secuencial con ventana de búsqueda corta para emparejar cada token del DOM
-    tts_idx = 0
-    num_tts = len(tts_words)
-    last_time = 0.0
-
+    # Mapear la posición de caracteres de cada palabra del DOM en spoken_text
+    w_cursor = 0
     for w_obj in words_meta:
-        target_norm = w_obj["norm"]
-        matched = None
-        if target_norm and tts_idx < num_tts:
-            # Buscar coincidencia exacta o prefijo dentro de una ventana de 6 tokens
-            for lookahead in range(min(6, num_tts - tts_idx)):
-                cand = tts_words[tts_idx + lookahead]
-                if (
-                    cand["norm"] == target_norm
-                    or (cand["norm"] and target_norm.startswith(cand["norm"]))
-                    or (cand["norm"] and cand["norm"].startswith(target_norm))
-                ):
-                    matched = cand
-                    tts_idx = tts_idx + lookahead + 1
-                    break
-
-        if matched is None and tts_idx < num_tts:
-            matched = tts_words[tts_idx]
-            tts_idx += 1
-
-        if matched is not None:
-            w_obj["start"] = matched["start"]
-            w_obj["end"] = matched["end"]
-            last_time = matched["end"]
+        w_text = w_obj["text"]
+        idx = spoken_text.find(w_text, w_cursor)
+        if idx == -1:
+            idx = spoken_text.lower().find(w_text.lower(), w_cursor)
+        if idx != -1 and idx - w_cursor < 35:
+            w_obj["char_start"] = idx
+            w_obj["char_end"] = idx + len(w_text)
+            w_cursor = w_obj["char_end"]
         else:
+            w_obj["char_start"] = w_cursor
+            w_obj["char_end"] = w_cursor + len(w_text)
+            w_cursor = w_obj["char_end"]
+
+    # Mapear la posición de caracteres de cada chunk devuelto por TTS
+    t_cursor = 0
+    for chunk in tts_words:
+        c_text = chunk["text"]
+        idx = spoken_text.lower().find(c_text.lower(), t_cursor)
+        if idx != -1 and idx - t_cursor < 50:
+            chunk["char_start"] = idx
+            chunk["char_end"] = idx + len(c_text)
+            t_cursor = chunk["char_end"]
+        else:
+            chunk["char_start"] = t_cursor
+            chunk["char_end"] = t_cursor + len(c_text)
+            t_cursor = chunk["char_end"]
+
+    if tts_words:
+        # Alineación precisa basada en superposición de caracteres y marcas de tiempo TTS
+        for w_obj in words_meta:
+            overlapping = [
+                c for c in tts_words
+                if not (c["char_end"] <= w_obj["char_start"] or c["char_start"] >= w_obj["char_end"])
+            ]
+            if overlapping:
+                w_obj["start"] = overlapping[0]["start"]
+                w_obj["end"] = overlapping[-1]["end"]
+            else:
+                nearest = min(tts_words, key=lambda c: abs(c["char_start"] - w_obj["char_start"]))
+                w_obj["start"] = nearest["start"]
+                w_obj["end"] = nearest["end"]
+
+        # Garantizar monotonía temporal limpia (el audio solo avanza en el tiempo)
+        cur_t = 0.0
+        for w_obj in words_meta:
+            if w_obj["start"] < cur_t:
+                w_obj["start"] = cur_t
+            if w_obj["end"] < w_obj["start"]:
+                w_obj["end"] = round(w_obj["start"] + 0.1, 3)
+            cur_t = w_obj["start"]
+        last_time = max((w_obj["end"] for w_obj in words_meta), default=0.0)
+    else:
+        # Fallback sintético si no hubo eventos de WordBoundary
+        last_time = 0.0
+        for w_obj in words_meta:
             w_obj["start"] = round(last_time, 3)
             w_obj["end"] = round(last_time + 0.18, 3)
             last_time = w_obj["end"]
