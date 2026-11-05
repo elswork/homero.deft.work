@@ -24,13 +24,7 @@ from fpdf import FPDF
 
 
 LANG_MAP = {
-    "zh": "zh-CN",
     "en": "en",
-    "hi": "hi",
-    "ar": "ar",
-    "fr": "fr",
-    "ru": "ru",
-    "pt": "pt",
     "es": "es",
 }
 
