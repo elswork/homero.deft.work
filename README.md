@@ -42,13 +42,60 @@ mi-libro/
 
 ---
 
-## Uso rápido
+## Uso y Ejecución Local
+
+Habiendo descartado la ejecución pesada en runners de GitHub Actions, Homero está diseñado para ejecutarse cómodamente en local antes de hacer `git push`. Puedes usar **Python nativo** o **Docker**.
+
+### 1. Opción A: Con Python (Recomendada si tienes Python 3.10+)
 
 ```bash
-# Instalar dependencias ligeras
+# 1. Situarse en la carpeta de Homero e instalar dependencias (solo la primera vez)
+cd /home/pirate/docker/homero.deft.work
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 
-# Compilar un libro (genera web, audiolibros, sincronización karaoke, EPUB y PDF)
-python3 homero.py build --book-dir /ruta/a/odisea.deft.work
+# 2. Solo traducir los capítulos desde el español a los demás idiomas configurados
+python3 homero.py translate --book-dir /home/pirate/docker/odisea.deft.work
+
+# 3. Compilar el libro (genera audiolibros MP3, sincronización Karaoke, EPUB, PDF y bundle web)
+python3 homero.py build --book-dir /home/pirate/docker/odisea.deft.work
+
+# 4. Traducir y compilar todo en un único comando
+python3 homero.py build --book-dir /home/pirate/docker/odisea.deft.work --translate
+
+# 5. Forzar regeneración completa de audios (incluso si no ha cambiado el texto)
+python3 homero.py build --book-dir /home/pirate/docker/odisea.deft.work --force-tts
 ```
+
+---
+
+### 2. Opción B: Con Docker (Sin instalar dependencias en tu máquina)
+
+Si prefieres no gestionar entornos de Python o fuentes del sistema (CJK, árabe, devanagari):
+
+```bash
+# 1. Construir la imagen Docker de Homero (solo la primera vez o si modificas homero.py)
+cd /home/pirate/docker/homero.deft.work
+docker build -t homero:latest .
+
+# 2. Solo traducir los capítulos
+docker run --rm -v /home/pirate/docker/odisea.deft.work:/book homero:latest translate
+
+# 3. Compilar el libro (audiolibros, karaoke, epub, pdf y web)
+docker run --rm -v /home/pirate/docker/odisea.deft.work:/book homero:latest build
+
+# 4. Traducir y compilar todo de una vez
+docker run --rm -v /home/pirate/docker/odisea.deft.work:/book homero:latest build --translate
+```
+
+---
+
+## ¿Cómo funciona el flujo de trabajo?
+
+1. **Escribes tu capítulo en español:** Creas o editas `capitulos/es/02-nombre-capitulo.md`.
+2. **Generas la traducción:** Ejecutas `python3 homero.py translate` (o con `--translate` al hacer build). Homero detecta los capítulos nuevos o modificados, traduce el texto respetando los formatos Markdown y crea los archivos correspondientes en los idiomas activados en `libro.yaml` (ej. `capitulos/en/...`).
+3. **Generas el audiolibro y karaoke:** Homero invoca el motor neuronal de Edge-TTS con la voz configurada para cada idioma en `libro.yaml`, calcula la marca de tiempo exacta de cada palabra, genera el audio `.mp3` y el archivo `.sync.json` para el karaoke interactivo.
+4. **Exportas formatos:** Se generan automáticamente las versiones `.epub` y `.pdf` en la carpeta `descargas/` y se actualiza `homero-bundle.js`.
+5. **Publicas:** Solo haces `git commit` y `git push` en el repositorio del libro. GitHub Pages actualizará la web instantáneamente en unos segundos.
 
