@@ -23,10 +23,10 @@ runs:
         python-version: "3.11"
         cache: "pip"
 
-    - name: Instalar fuentes del sistema
+    - name: Instalar fuentes del sistema (Unicode, CJK, Devanagari, Árabe)
       shell: bash
       run: |
-        sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
+        sudo apt-get update && sudo apt-get install -y fonts-dejavu-core fonts-noto-core fonts-noto-cjk
 
     - name: Instalar dependencias de Homero
       shell: bash

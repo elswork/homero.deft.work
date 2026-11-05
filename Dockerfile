@@ -11,6 +11,8 @@ LABEL org.opencontainers.image.authors="Eloy López Sánchez <elswork@gmail.com>
 # Fuentes TrueType para PDF y utilidades básicas
 RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-dejavu-core \
+    fonts-noto-core \
+    fonts-noto-cjk \
     git \
     curl \
     && rm -rf /var/lib/apt/lists/*

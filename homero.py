@@ -193,6 +193,8 @@ def clean_inline_markdown_to_plain(text: str) -> str:
     s = re.sub(r"\*\*([^*]+)\*\*", r"\1", s)
     s = re.sub(r"\*([^*]+)\*", r"\1", s)
     s = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", s)
+    # Limpiar cualquier marcador residual o huérfano
+    s = s.replace("**", "").replace("*", "").replace("`", "").replace("«", '"').replace("»", '"')
     return s.strip()
 
 
@@ -405,28 +407,40 @@ async def synthesize_and_align(
     spoken_text = " ".join(s["text"] for s in sentences_meta)
 
     print(f"  [TTS] Generando audiolibro y marcas de tiempo ({voice}) -> {mp3_path.name}...")
-    communicate = edge_tts.Communicate(
-        spoken_text,
-        voice=voice,
-        rate=rate,
-        boundary="WordBoundary",
-    )
-
     tts_words = []
-    with open(mp3_path, "wb") as audio_file:
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_file.write(chunk["data"])
-            elif chunk["type"] == "WordBoundary":
-                start_sec = round(chunk["offset"] / 10_000_000.0, 3)
-                dur_sec = round(chunk["duration"] / 10_000_000.0, 3)
-                end_sec = round(start_sec + max(dur_sec, 0.08), 3)
-                tts_words.append({
-                    "text": chunk["text"],
-                    "norm": normalize_word(chunk["text"]),
-                    "start": start_sec,
-                    "end": end_sec,
-                })
+    active_voice = voice
+    for attempt in range(2):
+        try:
+            communicate = edge_tts.Communicate(
+                spoken_text,
+                voice=active_voice,
+                rate=rate,
+                boundary="WordBoundary",
+            )
+            tts_words = []
+            with open(mp3_path, "wb") as audio_file:
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        audio_file.write(chunk["data"])
+                    elif chunk["type"] == "WordBoundary":
+                        start_sec = round(chunk["offset"] / 10_000_000.0, 3)
+                        dur_sec = round(chunk["duration"] / 10_000_000.0, 3)
+                        end_sec = round(start_sec + max(dur_sec, 0.08), 3)
+                        tts_words.append({
+                            "text": chunk["text"],
+                            "norm": normalize_word(chunk["text"]),
+                            "start": start_sec,
+                            "end": end_sec,
+                        })
+            if tts_words:
+                break
+        except Exception as err:
+            if attempt == 0:
+                fallback_voice = "ru-RU-SvetlanaNeural" if "ru-RU" in active_voice else "en-US-AriaNeural"
+                print(f"  [AVISO TTS] Falló voz {active_voice} ({err}). Reintentando con voz alternativa {fallback_voice}...")
+                active_voice = fallback_voice
+            else:
+                print(f"  [ERROR TTS] No se pudo generar audio para {mp3_path.name}: {err}")
 
     # Alineación secuencial con ventana de búsqueda corta para emparejar cada token del DOM
     tts_idx = 0
@@ -608,6 +622,45 @@ hr { border: 0; border-top: 1px solid #ccc; margin: 1.5em 0; }
     print(f"  [EPUB] Generado -> {out_path.name}")
 
 
+def find_font_for_lang(lang: str) -> tuple[str, str]:
+    """Busca fuentes TrueType/OpenType adecuadas según el sistema de escritura del idioma."""
+    candidates = []
+    if lang == "zh":
+        candidates = [
+            ("/usr/share/fonts/chromeos/notocjk/NotoSansCJK-Regular.ttc", "/usr/share/fonts/chromeos/notocjk/NotoSansCJK-Bold.ttc"),
+            ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
+            ("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc"),
+            ("/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc"),
+        ]
+    elif lang == "ar":
+        candidates = [
+            ("/usr/share/fonts/chromeos/noto/NotoSansArabic-Regular.ttf", "/usr/share/fonts/chromeos/noto/NotoSansArabic-Bold.ttf"),
+            ("/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf", "/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf"),
+        ]
+    elif lang == "hi":
+        candidates = [
+            ("/usr/share/fonts/chromeos/noto/NotoSansDevanagari-Regular.ttf", "/usr/share/fonts/chromeos/noto/NotoSansDevanagari-Bold.ttf"),
+            ("/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf", "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf"),
+        ]
+
+    for reg, bld in candidates:
+        if os.path.exists(reg):
+            bold_file = bld if os.path.exists(bld) else reg
+            return reg, bold_file
+
+    default_candidates = [
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"),
+        ("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        ("/usr/share/fonts/chromeos/noto/NotoSerif-Regular.ttf", "/usr/share/fonts/chromeos/noto/NotoSerif-Bold.ttf"),
+    ]
+    for reg, bld in default_candidates:
+        if os.path.exists(reg):
+            bold_file = bld if os.path.exists(bld) else reg
+            return reg, bold_file
+
+    return "", ""
+
+
 def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path):
     """Genera un archivo PDF maquetado con soporte Unicode completo."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -615,14 +668,12 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
     pdf.set_auto_page_break(auto=True, margin=22)
     pdf.set_margins(22, 22, 22)
 
-    font_reg = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"
-    font_bold = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
-    if not os.path.exists(font_reg):
-        font_reg = "/usr/share/fonts/chromeos/noto/NotoSerif-Regular.ttf"
-        font_bold = "/usr/share/fonts/chromeos/noto/NotoSerif-Bold.ttf"
-
-    pdf.add_font("BookSerif", style="", fname=font_reg)
-    pdf.add_font("BookSerif", style="B", fname=font_bold)
+    font_reg, font_bold = find_font_for_lang(lang)
+    if font_reg:
+        pdf.add_font("BookSerif", style="", fname=font_reg)
+        pdf.add_font("BookSerif", style="B", fname=font_bold)
+    else:
+        pdf.set_font("Helvetica", "", 11)
 
     for ch in chapters_data:
         pdf.add_page()
