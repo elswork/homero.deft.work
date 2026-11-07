@@ -227,6 +227,9 @@ def compile_markdown_for_karaoke(
     current_para = []
     in_list = False
     list_items = []
+    in_quote = False
+    quote_paras = []
+    curr_quote_lines = []
 
     def flush_para():
         nonlocal current_para
@@ -243,12 +246,51 @@ def compile_markdown_for_karaoke(
             list_items = []
         in_list = False
 
+    def flush_quote_para():
+        nonlocal curr_quote_lines, quote_paras
+        if curr_quote_lines:
+            joined = "\n".join(curr_quote_lines)
+            quote_paras.append(joined)
+            curr_quote_lines = []
+
+    def flush_quote():
+        nonlocal in_quote, quote_paras
+        flush_quote_para()
+        if quote_paras:
+            blocks.append(("blockquote", quote_paras[:]))
+            quote_paras = []
+        in_quote = False
+
     for raw_line in lines:
         line = raw_line.strip()
         if not line:
+            if in_quote:
+                flush_quote_para()
+            else:
+                flush_para()
+                flush_list()
+            continue
+
+        if line.startswith(">"):
             flush_para()
             flush_list()
+            in_quote = True
+            q_text = raw_line.lstrip()
+            if q_text.startswith("> "):
+                q_line = q_text[2:]
+            elif q_text.startswith(">"):
+                q_line = q_text[1:].lstrip()
+            else:
+                q_line = ""
+            if not q_line.strip():
+                flush_quote_para()
+            else:
+                curr_quote_lines.append(q_line)
             continue
+
+        if in_quote:
+            flush_quote()
+
         if line == "---":
             flush_para()
             flush_list()
@@ -288,6 +330,7 @@ def compile_markdown_for_karaoke(
 
     flush_para()
     flush_list()
+    flush_quote()
 
     sentences_meta = []
     words_meta = []
@@ -301,25 +344,80 @@ def compile_markdown_for_karaoke(
         nonlocal s_counter, w_counter
         s_id = s_counter
         s_counter += 1
-        tokens = [t for t in raw_sentence.split(" ") if t]
-        word_spans = []
-        s_word_ids = []
-        for tok in tokens:
-            w_id = w_counter
-            w_counter += 1
-            plain_tok = clean_inline_markdown_to_plain(tok)
-            norm_tok = normalize_word(plain_tok)
-            words_meta.append({
-                "w": w_id,
-                "s": s_id,
-                "text": plain_tok,
-                "norm": norm_tok,
-                "start": 0.0,
-                "end": 0.0,
-            })
-            s_word_ids.append(w_id)
-            word_spans.append(format_word_html(tok, w_id, s_id))
 
+        pattern = re.compile(
+            r"(\[(?P<link_text>[^\]]+)\]\((?P<link_url>[^)]+)\))|"
+            r"(\*\*`(?P<bold_code_text>[^`]+)`\*\*)|"
+            r"(`(?P<code_text>[^`]+)`)|"
+            r"(\*\*(?P<bold_text>[^*]+)\*\*)|"
+            r"(\*(?P<italic_text>[^*]+)\*)"
+        )
+
+        pos = 0
+        pieces = []
+        for m in pattern.finditer(raw_sentence):
+            pre = raw_sentence[pos:m.start()]
+            if pre:
+                pieces.append(("plain", pre, None))
+            if m.group("link_text"):
+                pieces.append(("link", m.group("link_text"), m.group("link_url")))
+            elif m.group("bold_code_text"):
+                pieces.append(("bold_code", m.group("bold_code_text"), None))
+            elif m.group("code_text"):
+                pieces.append(("code", m.group("code_text"), None))
+            elif m.group("bold_text"):
+                pieces.append(("bold", m.group("bold_text"), None))
+            elif m.group("italic_text"):
+                pieces.append(("italic", m.group("italic_text"), None))
+            pos = m.end()
+        post = raw_sentence[pos:]
+        if post:
+            pieces.append(("plain", post, None))
+
+        html_fragments = []
+        s_word_ids = []
+
+        for kind, text, extra in pieces:
+            parts = re.split(r"(\s+)", text)
+            frag_tokens = []
+            for p in parts:
+                if not p:
+                    continue
+                if p.isspace():
+                    frag_tokens.append(p)
+                else:
+                    w_id = w_counter
+                    w_counter += 1
+                    plain_tok = p
+                    norm_tok = normalize_word(plain_tok)
+                    words_meta.append({
+                        "w": w_id,
+                        "s": s_id,
+                        "text": plain_tok,
+                        "norm": norm_tok,
+                        "start": 0.0,
+                        "end": 0.0,
+                    })
+                    s_word_ids.append(w_id)
+                    escaped = html.escape(plain_tok)
+                    span = f'<span class="hm-word" id="w-{w_id}" data-w="{w_id}" data-s="{s_id}">{escaped}</span>'
+                    frag_tokens.append(span)
+
+            rendered_frag = "".join(frag_tokens)
+            if kind == "link":
+                html_fragments.append(f'<a href="{html.escape(extra)}" target="_blank" rel="noopener" class="hm-link">{rendered_frag}</a>')
+            elif kind == "bold_code":
+                html_fragments.append(f"<strong><code>{rendered_frag}</code></strong>")
+            elif kind == "code":
+                html_fragments.append(f"<code>{rendered_frag}</code>")
+            elif kind == "bold":
+                html_fragments.append(f"<strong>{rendered_frag}</strong>")
+            elif kind == "italic":
+                html_fragments.append(f"<em>{rendered_frag}</em>")
+            else:
+                html_fragments.append(rendered_frag)
+
+        inner_html = "".join(html_fragments)
         plain_sentence = clean_inline_markdown_to_plain(raw_sentence)
         sentences_meta.append({
             "s": s_id,
@@ -328,7 +426,6 @@ def compile_markdown_for_karaoke(
             "start": 0.0,
             "end": 0.0,
         })
-        inner_html = " ".join(word_spans)
         return f'<span class="hm-sentence" id="s-{s_id}" data-s="{s_id}">{inner_html}</span>'
 
     # 1. El audiolibro y el karaoke comienzan con el Título del capítulo
@@ -370,6 +467,27 @@ def compile_markdown_for_karaoke(
             rendered_sents = [register_sentence(st) for st in sents]
             html_parts.append(f"<p>{' '.join(rendered_sents)}</p>")
             clean_blocks.append(("p", clean_inline_markdown_to_plain(bcontent)))
+        elif btype == "blockquote":
+            b_paras_html = []
+            clean_paras = []
+            for q_para in bcontent:
+                lines_in_para = q_para.split("\n")
+                lines_html = []
+                clean_lines = []
+                for q_line in lines_in_para:
+                    q_line_clean = q_line.strip()
+                    if not q_line_clean:
+                        continue
+                    sents = split_into_sentences(q_line_clean)
+                    rendered_sents = [register_sentence(st) for st in sents]
+                    lines_html.append(" ".join(rendered_sents))
+                    clean_lines.append(clean_inline_markdown_to_plain(q_line_clean))
+                if lines_html:
+                    joined_html = "<br>".join(lines_html)
+                    b_paras_html.append(f"<p>{joined_html}</p>")
+                    clean_paras.append("\n".join(clean_lines))
+            html_parts.append(f'<blockquote class="chapter-letter">\n' + "\n".join(b_paras_html) + "\n</blockquote>")
+            clean_blocks.append(("blockquote", clean_paras))
 
     return title_html, subtitle_html, author_html, "\n".join(html_parts), sentences_meta, words_meta, clean_blocks
 
@@ -586,6 +704,12 @@ hr { border: 0; border-top: 1px solid #ccc; margin: 1.5em 0; }
                     body_elems.append(f"<ol>{items_xml}</ol>")
                 elif btype == "p":
                     body_elems.append(f"<p>{html.escape(bcontent)}</p>")
+                elif btype == "blockquote":
+                    q_html = []
+                    for qp in bcontent:
+                        qp_lines = [html.escape(l) for l in qp.split("\n")]
+                        q_html.append(f"<p>{'<br/>'.join(qp_lines)}</p>")
+                    body_elems.append(f'<blockquote class="chapter-letter">{"".join(q_html)}</blockquote>')
 
             ch_xhtml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
@@ -739,6 +863,19 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
                 pdf.set_font("BookSerif", "", 11)
                 pdf.multi_cell(0, 6.8, bcontent)
                 pdf.ln(3.5)
+            elif btype == "blockquote":
+                pdf.ln(2)
+                pdf.set_font("BookSerif", "", 10)
+                pdf.set_text_color(70, 74, 82)
+                orig_l = pdf.l_margin
+                pdf.set_left_margin(orig_l + 8)
+                for qp in bcontent:
+                    pdf.multi_cell(0, 6.2, qp)
+                    pdf.ln(2)
+                pdf.set_left_margin(orig_l)
+                pdf.set_font("BookSerif", "", 11)
+                pdf.set_text_color(28, 30, 33)
+                pdf.ln(2)
 
     pdf.output(str(out_path))
     print(f"  [PDF]  Generado -> {out_path.name}")
