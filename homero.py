@@ -141,9 +141,13 @@ def auto_translate_book(book_dir: Path, source_lang: str = "es"):
 
         print(f"\n[TRADUCCIÓN] Sincronizando idioma [{target_lang.upper()}] ({linfo.get('nombre', target_lang)})...")
         for s_file in source_files:
-            t_file = target_dir / s_file.name
             s_content = s_file.read_text(encoding="utf-8")
+            s_meta, s_body = parse_frontmatter_and_body(s_content)
+            content_lines = [l.strip() for l in s_body.splitlines() if l.strip() and not l.strip().startswith("# ")]
+            if not content_lines:
+                continue
             s_hash = hashlib.sha256(s_content.encode("utf-8")).hexdigest()[:16]
+            t_file = target_dir / s_file.name
 
             needs_trans = True
             if t_file.exists():
@@ -926,6 +930,9 @@ async def build_book(
         for md_file in md_files:
             raw_md = md_file.read_text(encoding="utf-8")
             meta, body = parse_frontmatter_and_body(raw_md)
+            if not body.strip():
+                print(f"  [BORRADOR] {md_file.name} sin cuerpo de texto (omitido de la compilación).")
+                continue
             slug = md_file.stem
             ch_num = meta.get("capitulo", 1)
             ch_title = meta.get("titulo", slug)
@@ -938,6 +945,11 @@ async def build_book(
                     body, ch_num, ch_title, ch_subtitle, author_name, lang
                 )
             )
+
+            # Si el archivo no tiene bloques de contenido redactado (párrafos, citas o listas), omitir
+            if not any(b[0] in ("p", "h2", "blockquote", "ol", "ul") for b in clean_blocks):
+                print(f"  [BORRADOR] {md_file.name} sin contenido redactado (omitido de la compilación).")
+                continue
 
             spoken_text = " ".join(s["text"] for s in s_meta)
             text_hash = hashlib.sha256(f"{linfo['voz_tts']}::{spoken_text}".encode("utf-8")).hexdigest()[:16]
