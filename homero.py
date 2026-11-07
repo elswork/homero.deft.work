@@ -226,6 +226,7 @@ def compile_markdown_for_karaoke(
     blocks = []
     current_para = []
     in_list = False
+    list_type = "ol"
     list_items = []
     in_quote = False
     quote_paras = []
@@ -240,9 +241,9 @@ def compile_markdown_for_karaoke(
             current_para = []
 
     def flush_list():
-        nonlocal in_list, list_items
+        nonlocal in_list, list_items, list_type
         if list_items:
-            blocks.append(("ol", list_items[:]))
+            blocks.append((list_type, list_items[:]))
             list_items = []
         in_list = False
 
@@ -315,12 +316,18 @@ def compile_markdown_for_karaoke(
         m_ol = re.match(r"^\d+\.\s+(.*)$", line)
         if m_ol:
             flush_para()
+            if in_list and list_type != "ol":
+                flush_list()
             in_list = True
+            list_type = "ol"
             list_items.append(m_ol.group(1).strip())
             continue
-        if line.startswith("* "):
+        if line.startswith("* ") or line.startswith("- "):
             flush_para()
+            if in_list and list_type != "ul":
+                flush_list()
             in_list = True
+            list_type = "ul"
             list_items.append(line[2:].strip())
             continue
 
@@ -452,7 +459,7 @@ def compile_markdown_for_karaoke(
             s_html = register_sentence(bcontent)
             html_parts.append(f"<h2>{s_html}</h2>")
             clean_blocks.append(("h2", clean_inline_markdown_to_plain(bcontent)))
-        elif btype == "ol":
+        elif btype in ("ol", "ul"):
             li_htmls = []
             clean_items = []
             for item in bcontent:
@@ -460,8 +467,8 @@ def compile_markdown_for_karaoke(
                 rendered_sents = [register_sentence(st) for st in sents]
                 li_htmls.append(f"<li>{' '.join(rendered_sents)}</li>")
                 clean_items.append(clean_inline_markdown_to_plain(item))
-            html_parts.append(f"<ol>{''.join(li_htmls)}</ol>")
-            clean_blocks.append(("ol", clean_items))
+            html_parts.append(f"<{btype}>{''.join(li_htmls)}</{btype}>")
+            clean_blocks.append((btype, clean_items))
         elif btype == "p":
             sents = split_into_sentences(bcontent)
             rendered_sents = [register_sentence(st) for st in sents]
@@ -699,9 +706,9 @@ hr { border: 0; border-top: 1px solid #ccc; margin: 1.5em 0; }
                     body_elems.append("<hr/>")
                 elif btype == "h2":
                     body_elems.append(f"<h2>{html.escape(bcontent)}</h2>")
-                elif btype == "ol":
+                elif btype in ("ol", "ul"):
                     items_xml = "".join(f"<li>{html.escape(it)}</li>" for it in bcontent)
-                    body_elems.append(f"<ol>{items_xml}</ol>")
+                    body_elems.append(f"<{btype}>{items_xml}</{btype}>")
                 elif btype == "p":
                     body_elems.append(f"<p>{html.escape(bcontent)}</p>")
                 elif btype == "blockquote":
@@ -853,10 +860,11 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
                 pdf.set_font("BookSerif", "B", 13)
                 pdf.multi_cell(0, 7.5, bcontent)
                 pdf.ln(2)
-            elif btype == "ol":
+            elif btype in ("ol", "ul"):
                 pdf.set_font("BookSerif", "", 11)
                 for idx_li, it in enumerate(bcontent, start=1):
-                    pdf.multi_cell(0, 6.8, f"  {idx_li}. {it}")
+                    prefix = f"  {idx_li}. " if btype == "ol" else "  - "
+                    pdf.multi_cell(0, 6.8, f"{prefix}{it}")
                     pdf.ln(1.5)
                 pdf.ln(2)
             elif btype == "p":
