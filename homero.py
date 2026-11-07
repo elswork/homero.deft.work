@@ -197,9 +197,21 @@ def clean_inline_markdown_to_plain(text: str) -> str:
 
 
 def split_into_sentences(text: str):
-    """Divide un párrafo en frases manteniendo signos de puntuación."""
-    parts = re.split(r"(?<=[.?!])\s+", text.strip())
-    return [p.strip() for p in parts if p.strip()]
+    """Divide un párrafo en frases manteniendo signos de puntuación sin romper enlaces Markdown ni abreviaturas comunes."""
+    # 1. Proteger puntos dentro de enlaces Markdown [texto](url)
+    def mask_link(match):
+        return match.group(0).replace(".", "§DOT§")
+
+    masked = re.sub(r"\[[^\]]+\]\([^)]+\)", mask_link, text.strip())
+
+    # 2. Proteger abreviaturas comunes (Dr., Dra., Sr., Sra., etc.)
+    masked = re.sub(r"\b(Dr|Dra|Sr|Sra|Prof|etc|ej|pág|EE\.UU|U\.S)\.", r"\1§DOT§", masked, flags=re.IGNORECASE)
+
+    # 3. Dividir por fin de frase (. ? !)
+    parts = re.split(r"(?<=[.?!])\s+", masked)
+
+    # 4. Restaurar los puntos protegidos
+    return [p.replace("§DOT§", ".").strip() for p in parts if p.strip()]
 
 
 def format_word_html(raw_token: str, w_id: int, s_id: int) -> str:
