@@ -92,6 +92,13 @@ def translate_markdown_file(source_content: str, sl: str, tl: str) -> str:
             tr_paras.append(f"> {translate_text(q_text, sl, tl)}")
         elif p_strip.startswith("---") or p_strip.startswith("***"):
             tr_paras.append(p_strip)
+        elif p_strip.startswith("!["):
+            m = re.match(r"^!\[(.*?)\]\((.*?)\)$", p_strip)
+            if m:
+                alt = translate_text(m.group(1), sl, tl)
+                tr_paras.append(f"![{alt}]({m.group(2)})")
+            else:
+                tr_paras.append(p_strip)
         else:
             lines = p_strip.splitlines()
             if any(re.match(r"^\d+\.\s+", l) for l in lines):
@@ -329,6 +336,12 @@ def compile_markdown_for_karaoke(
             heading_text = re.sub(r"^#{2,3}\s+", "", line).strip()
             blocks.append(("h2", heading_text))
             continue
+        m_img = re.match(r"^!\[(.*?)\]\((.*?)\)$", line)
+        if m_img:
+            flush_para()
+            flush_list()
+            blocks.append(("img", (m_img.group(1).strip(), m_img.group(2).strip())))
+            continue
         m_ol = re.match(r"^\d+\.\s+(.*)$", line)
         if m_ol:
             flush_para()
@@ -471,6 +484,13 @@ def compile_markdown_for_karaoke(
         if btype == "hr":
             html_parts.append('<hr class="chapter-divider">')
             clean_blocks.append(("hr", ""))
+        elif btype == "img":
+            alt_text, src_url = bcontent
+            caption_html = f"<figcaption>{alt_text}</figcaption>" if alt_text else ""
+            html_parts.append(
+                f'<figure class="chapter-figure"><img src="{src_url}" alt="{alt_text}" loading="lazy">{caption_html}</figure>'
+            )
+            clean_blocks.append(("img", (alt_text, src_url)))
         elif btype == "h2":
             s_html = register_sentence(bcontent)
             html_parts.append(f"<h2>{s_html}</h2>")
@@ -720,6 +740,12 @@ hr { border: 0; border-top: 1px solid #ccc; margin: 1.5em 0; }
             for btype, bcontent in ch["clean_blocks"]:
                 if btype == "hr":
                     body_elems.append("<hr/>")
+                elif btype == "img":
+                    alt_text, src_url = bcontent
+                    caption_html = f"<figcaption>{html.escape(alt_text)}</figcaption>" if alt_text else ""
+                    body_elems.append(
+                        f'<figure class="chapter-figure"><img src="{html.escape(src_url)}" alt="{html.escape(alt_text)}"/>{caption_html}</figure>'
+                    )
                 elif btype == "h2":
                     body_elems.append(f"<h2>{html.escape(bcontent)}</h2>")
                 elif btype in ("ol", "ul"):
@@ -883,6 +909,25 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
                     pdf.multi_cell(0, 6.8, f"{prefix}{it}")
                     pdf.ln(1.5)
                 pdf.ln(2)
+            elif btype == "img":
+                alt_text, src_url = bcontent
+                img_path = (out_path.parent.parent / src_url).resolve() if not os.path.isabs(src_url) else Path(src_url)
+                if img_path.exists():
+                    try:
+                        pdf.ln(3)
+                        img_w = 110
+                        x_pos = (pdf.w - img_w) / 2
+                        pdf.image(str(img_path), x=x_pos, w=img_w)
+                        pdf.ln(2)
+                        if alt_text:
+                            pdf.set_font("BookSerif", "I", 9)
+                            pdf.set_text_color(110, 115, 125)
+                            pdf.multi_cell(0, 5, alt_text, align="C")
+                            pdf.set_text_color(28, 30, 33)
+                            pdf.set_font("BookSerif", "", 11)
+                            pdf.ln(3)
+                    except Exception as e:
+                        print(f"    [WARN] No se pudo incrustar imagen {src_url} en PDF: {e}")
             elif btype == "p":
                 pdf.set_font("BookSerif", "", 11)
                 pdf.multi_cell(0, 6.8, bcontent)
