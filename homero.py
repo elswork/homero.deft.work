@@ -750,6 +750,28 @@ hr { border: 0; border-top: 1px solid #ccc; margin: 1.5em 0; }
         spine_items = []
         nav_links = []
 
+        cover_rel = book_cfg.get("libro", {}).get("portada")
+        if cover_rel and Path(cover_rel).exists():
+            manifest_items.append('<item id="cover-image" href="cover.jpg" media-type="image/jpeg" properties="cover-image"/>')
+            manifest_items.append('<item id="cover-page" href="cover.xhtml" media-type="application/xhtml+xml"/>')
+            spine_items.append('<itemref idref="cover-page"/>')
+            zf.write(str(cover_rel), "OEBPS/cover.jpg")
+            cover_xhtml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{lang}" lang="{lang}">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Portada</title>
+  <style>body {{ margin: 0; padding: 0; text-align: center; background-color: #040915; }} img {{ max-width: 100%; height: auto; max-height: 100vh; object-fit: contain; }}</style>
+</head>
+<body>
+  <div style="text-align: center;">
+    <img src="cover.jpg" alt="{html.escape(book_title)}"/>
+  </div>
+</body>
+</html>"""
+            zf.writestr("OEBPS/cover.xhtml", cover_xhtml)
+
         for idx, ch in enumerate(chapters_data, start=1):
             fname = f"chapter_{idx:02d}.xhtml"
             item_id = f"ch{idx:02d}"
@@ -898,6 +920,12 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
         pdf.add_font("BookSerif", style="BI", fname=font_bold)
     else:
         pdf.set_font("Helvetica", "", 11)
+
+    cover_rel = book_cfg.get("libro", {}).get("portada")
+    if cover_rel and Path(cover_rel).exists():
+        pdf.add_page()
+        # Portada completa a sangre (210 x 297 mm en A4)
+        pdf.image(str(cover_rel), x=0, y=0, w=210, h=297)
 
     for ch in chapters_data:
         pdf.add_page()
