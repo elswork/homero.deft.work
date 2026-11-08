@@ -997,6 +997,7 @@ async def build_book(
     compiled_bundle = {
         "libro": book_cfg["libro"],
         "patrocinio": book_cfg.get("patrocinio", {}),
+        "analitica": book_cfg.get("analitica", {}),
         "idiomas": {},
     }
 
