@@ -920,7 +920,7 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
                         pdf.image(str(img_path), x=x_pos, w=img_w)
                         pdf.ln(2)
                         if alt_text:
-                            pdf.set_font("BookSerif", "I", 9)
+                            pdf.set_font("BookSerif", "", 9)
                             pdf.set_text_color(110, 115, 125)
                             pdf.multi_cell(0, 5, alt_text, align="C")
                             pdf.set_text_color(28, 30, 33)
