@@ -200,7 +200,7 @@ def parse_frontmatter_and_body(md_text: str):
 
 
 def clean_inline_markdown_to_plain(text: str) -> str:
-    """Convierte inline markdown a texto limpio para hablar/PDF."""
+    """Convierte inline markdown a texto limpio para hablar/TTS."""
     s = re.sub(r"\*\*`([^`]+)`\*\*", r"\1", text)
     s = re.sub(r"`([^`]+)`", r"\1", s)
     s = re.sub(r"\*\*([^*]+)\*\*", r"\1", s)
@@ -209,6 +209,21 @@ def clean_inline_markdown_to_plain(text: str) -> str:
     # Limpiar cualquier marcador residual o huérfano
     s = s.replace("**", "").replace("*", "").replace("`", "").replace("«", '"').replace("»", '"')
     return s.strip()
+
+
+def markdown_inline_to_xhtml(text: str) -> str:
+    """Convierte elementos inline de Markdown a XHTML válido con enlaces y estilos para EPUB."""
+    def repl_link(m):
+        txt = html.escape(m.group(1))
+        url = html.escape(m.group(2))
+        return f'<a href="{url}">{txt}</a>'
+
+    out = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", repl_link, text)
+    out = re.sub(r"\*\*`([^`]+)`\*\*", lambda m: f"<strong><code>{html.escape(m.group(1))}</code></strong>", out)
+    out = re.sub(r"\*\*([^*]+)\*\*", lambda m: f"<strong>{m.group(1)}</strong>", out)
+    out = re.sub(r"\*([^*]+)\*", lambda m: f"<em>{m.group(1)}</em>", out)
+    out = re.sub(r"`([^`]+)`", lambda m: f"<code>{html.escape(m.group(1))}</code>", out)
+    return out
 
 
 def split_into_sentences(text: str):
@@ -502,7 +517,7 @@ def compile_markdown_for_karaoke(
         elif btype == "h2":
             s_html = register_sentence(bcontent)
             html_parts.append(f"<h2>{s_html}</h2>")
-            clean_blocks.append(("h2", clean_inline_markdown_to_plain(bcontent)))
+            clean_blocks.append(("h2", bcontent))
         elif btype in ("ol", "ul"):
             li_htmls = []
             clean_items = []
@@ -510,14 +525,14 @@ def compile_markdown_for_karaoke(
                 sents = split_into_sentences(item)
                 rendered_sents = [register_sentence(st) for st in sents]
                 li_htmls.append(f"<li>{' '.join(rendered_sents)}</li>")
-                clean_items.append(clean_inline_markdown_to_plain(item))
+                clean_items.append(item)
             html_parts.append(f"<{btype}>{''.join(li_htmls)}</{btype}>")
             clean_blocks.append((btype, clean_items))
         elif btype == "p":
             sents = split_into_sentences(bcontent)
             rendered_sents = [register_sentence(st) for st in sents]
             html_parts.append(f"<p>{' '.join(rendered_sents)}</p>")
-            clean_blocks.append(("p", clean_inline_markdown_to_plain(bcontent)))
+            clean_blocks.append(("p", bcontent))
         elif btype == "blockquote":
             b_paras_html = []
             clean_paras = []
@@ -532,7 +547,7 @@ def compile_markdown_for_karaoke(
                     sents = split_into_sentences(q_line_clean)
                     rendered_sents = [register_sentence(st) for st in sents]
                     lines_html.append(" ".join(rendered_sents))
-                    clean_lines.append(clean_inline_markdown_to_plain(q_line_clean))
+                    clean_lines.append(q_line_clean)
                 if lines_html:
                     joined_html = "<br>".join(lines_html)
                     b_paras_html.append(f"<p>{joined_html}</p>")
@@ -755,16 +770,16 @@ hr { border: 0; border-top: 1px solid #ccc; margin: 1.5em 0; }
                         f'<figure class="chapter-figure"><img src="{html.escape(src_url)}" alt="{html.escape(alt_text)}"/>{caption_html}</figure>'
                     )
                 elif btype == "h2":
-                    body_elems.append(f"<h2>{html.escape(bcontent)}</h2>")
+                    body_elems.append(f"<h2>{markdown_inline_to_xhtml(bcontent)}</h2>")
                 elif btype in ("ol", "ul"):
-                    items_xml = "".join(f"<li>{html.escape(it)}</li>" for it in bcontent)
+                    items_xml = "".join(f"<li>{markdown_inline_to_xhtml(it)}</li>" for it in bcontent)
                     body_elems.append(f"<{btype}>{items_xml}</{btype}>")
                 elif btype == "p":
-                    body_elems.append(f"<p>{html.escape(bcontent)}</p>")
+                    body_elems.append(f"<p>{markdown_inline_to_xhtml(bcontent)}</p>")
                 elif btype == "blockquote":
                     q_html = []
                     for qp in bcontent:
-                        qp_lines = [html.escape(l) for l in qp.split("\n")]
+                        qp_lines = [markdown_inline_to_xhtml(l) for l in qp.split("\n")]
                         q_html.append(f"<p>{'<br/>'.join(qp_lines)}</p>")
                     body_elems.append(f'<blockquote class="chapter-letter">{"".join(q_html)}</blockquote>')
 
@@ -871,10 +886,16 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
     pdf.set_auto_page_break(auto=True, margin=22)
     pdf.set_margins(22, 22, 22)
 
+    # Activar estilo y color azul UE para enlaces Markdown en PDF
+    pdf.MARKDOWN_LINK_COLOR = (0, 51, 153)
+    pdf.MARKDOWN_LINK_UNDERLINE = True
+
     font_reg, font_bold = find_font_for_lang(lang)
     if font_reg:
         pdf.add_font("BookSerif", style="", fname=font_reg)
         pdf.add_font("BookSerif", style="B", fname=font_bold)
+        pdf.add_font("BookSerif", style="I", fname=font_reg)
+        pdf.add_font("BookSerif", style="BI", fname=font_bold)
     else:
         pdf.set_font("Helvetica", "", 11)
 
@@ -908,13 +929,13 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
             elif btype == "h2":
                 pdf.ln(4)
                 pdf.set_font("BookSerif", "B", 13)
-                pdf.multi_cell(0, 7.5, bcontent)
+                pdf.multi_cell(0, 7.5, bcontent, markdown=True)
                 pdf.ln(2)
             elif btype in ("ol", "ul"):
                 pdf.set_font("BookSerif", "", 11)
                 for idx_li, it in enumerate(bcontent, start=1):
                     prefix = f"  {idx_li}. " if btype == "ol" else "  - "
-                    pdf.multi_cell(0, 6.8, f"{prefix}{it}")
+                    pdf.multi_cell(0, 6.8, f"{prefix}{it}", markdown=True)
                     pdf.ln(1.5)
                 pdf.ln(2)
             elif btype == "img":
@@ -938,7 +959,7 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
                         print(f"    [WARN] No se pudo incrustar imagen {src_url} en PDF: {e}")
             elif btype == "p":
                 pdf.set_font("BookSerif", "", 11)
-                pdf.multi_cell(0, 6.8, bcontent)
+                pdf.multi_cell(0, 6.8, bcontent, markdown=True)
                 pdf.ln(3.5)
             elif btype == "blockquote":
                 pdf.ln(2)
@@ -947,7 +968,7 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
                 orig_l = pdf.l_margin
                 pdf.set_left_margin(orig_l + 8)
                 for qp in bcontent:
-                    pdf.multi_cell(0, 6.2, qp)
+                    pdf.multi_cell(0, 6.2, qp, markdown=True)
                     pdf.ln(2)
                 pdf.set_left_margin(orig_l)
                 pdf.set_font("BookSerif", "", 11)
