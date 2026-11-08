@@ -26,6 +26,14 @@ from fpdf import FPDF
 LANG_MAP = {
     "en": "en",
     "es": "es",
+    "fr": "fr",
+    "pt": "pt",
+    "el": "el",
+    "hu": "hu",
+    "hr": "hr",
+    "ru": "ru",
+    "zh": "zh-CN",
+    "cn": "zh-CN",
 }
 
 
@@ -820,7 +828,7 @@ hr { border: 0; border-top: 1px solid #ccc; margin: 1.5em 0; }
 def find_font_for_lang(lang: str) -> tuple[str, str]:
     """Busca fuentes TrueType/OpenType adecuadas según el sistema de escritura del idioma."""
     candidates = []
-    if lang == "zh":
+    if lang in ("zh", "cn", "zh-CN"):
         candidates = [
             ("/usr/share/fonts/chromeos/notocjk/NotoSansCJK-Regular.ttc", "/usr/share/fonts/chromeos/notocjk/NotoSansCJK-Bold.ttc"),
             ("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
