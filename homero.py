@@ -9,6 +9,7 @@ import asyncio
 import datetime
 import hashlib
 import html
+import io
 import json
 import os
 import re
@@ -17,6 +18,12 @@ import urllib.request
 import uuid
 import zipfile
 from pathlib import Path
+
+try:
+    from PIL import Image
+    HAVE_PIL = True
+except ImportError:
+    HAVE_PIL = False
 
 import edge_tts
 import yaml
@@ -710,12 +717,13 @@ async def synthesize_and_align(
 
 
 def generate_epub(book_cfg: dict, lang: str, chapters_data: list, out_path: Path):
-    """Genera un archivo EPUB 3 estándar y válido."""
+    """Genera un archivo EPUB 3 estándar y válido compatible con Amazon Kindle y e-readers."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     book_title = book_cfg["libro"]["titulo"]
     author = book_cfg["libro"]["autor"]
     book_uid = f"urn:uuid:{uuid.uuid5(uuid.NAMESPACE_DNS, f'odisea.deft.work/{lang}')}"
     now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    book_dir = out_path.resolve().parent.parent
 
     with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         # 1. mimetype debe ir primero y sin comprimir
@@ -732,7 +740,7 @@ def generate_epub(book_cfg: dict, lang: str, chapters_data: list, out_path: Path
 </container>""",
         )
 
-        # 3. OEBPS/styles.css
+        # 3. OEBPS/styles.css con estilos adaptados a Kindle y pantallas e-ink
         zf.writestr(
             "OEBPS/styles.css",
             """body { font-family: Georgia, serif; line-height: 1.65; margin: 5%; color: #1c1e21; }
@@ -740,6 +748,11 @@ h1 { font-size: 1.8em; color: #003399; margin-bottom: 0.2em; }
 h2 { font-size: 1.3em; margin-top: 1.6em; color: #1c1e21; }
 .subtitle { font-style: italic; color: #5c5f66; margin-bottom: 1.8em; }
 hr { border: 0; border-top: 1px solid #ccc; margin: 1.5em 0; }
+figure.chapter-figure { margin: 1.8em 0; text-align: center; page-break-inside: avoid; }
+figure.chapter-figure img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+figcaption { font-size: 0.85em; font-style: italic; color: #555555; margin-top: 0.6em; text-align: center; }
+blockquote.chapter-letter { margin: 1.5em 5%; padding: 0.8em 1.2em; border-left: 3px solid #003399; background: #f8f9fa; font-style: italic; }
+a { color: #003399; text-decoration: underline; }
 """,
         )
 
@@ -751,11 +764,12 @@ hr { border: 0; border-top: 1px solid #ccc; margin: 1.5em 0; }
         nav_links = []
 
         cover_rel = book_cfg.get("libro", {}).get("portada")
-        if cover_rel and Path(cover_rel).exists():
+        cover_path = (book_dir / cover_rel).resolve() if (cover_rel and not os.path.isabs(cover_rel)) else (Path(cover_rel) if cover_rel else None)
+        if cover_path and cover_path.exists():
             manifest_items.append('<item id="cover-image" href="cover.jpg" media-type="image/jpeg" properties="cover-image"/>')
             manifest_items.append('<item id="cover-page" href="cover.xhtml" media-type="application/xhtml+xml"/>')
             spine_items.append('<itemref idref="cover-page"/>')
-            zf.write(str(cover_rel), "OEBPS/cover.jpg")
+            zf.write(str(cover_path), "OEBPS/cover.jpg")
             cover_xhtml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{lang}" lang="{lang}">
@@ -771,6 +785,80 @@ hr { border: 0; border-top: 1px solid #ccc; margin: 1.5em 0; }
 </body>
 </html>"""
             zf.writestr("OEBPS/cover.xhtml", cover_xhtml)
+
+        # 3.1 Pre-procesar e incrustar todas las ilustraciones de los capítulos en formato compatible Kindle
+        # Amazon Kindle no soporta WebP en EPUB (Send to Kindle lo descarta silenciosamente o produce páginas en blanco).
+        # Convertimos WebP y cualquier formato no estándar a JPEG (o PNG si tiene canal alfa) e incrustamos las imágenes en el zip y el manifiesto.
+        embedded_images = {}
+        for ch in chapters_data:
+            for btype, bcontent in ch.get("clean_blocks", []):
+                if btype == "img":
+                    alt_text, src_url = bcontent
+                    if src_url in embedded_images:
+                        continue
+                    img_disk_path = (book_dir / src_url).resolve() if not os.path.isabs(src_url) else Path(src_url)
+                    if not img_disk_path.exists():
+                        print(f"    [WARN] Imagen no encontrada en disco: {src_url} ({img_disk_path})")
+                        continue
+                    try:
+                        dest_ext = ".jpg"
+                        media_type = "image/jpeg"
+                        if HAVE_PIL:
+                            with Image.open(img_disk_path) as im:
+                                img_fmt = (im.format or "").upper()
+                                has_alpha = im.mode in ("RGBA", "LA") or (im.mode == "P" and "transparency" in im.info)
+                                if has_alpha:
+                                    dest_ext = ".png"
+                                    media_type = "image/png"
+                                    bio = io.BytesIO()
+                                    im.save(bio, format="PNG", optimize=True)
+                                    img_bytes = bio.getvalue()
+                                elif img_fmt == "JPEG" and img_disk_path.suffix.lower() in (".jpg", ".jpeg"):
+                                    dest_ext = ".jpg"
+                                    media_type = "image/jpeg"
+                                    img_bytes = img_disk_path.read_bytes()
+                                else:
+                                    # Convertir WebP y cualquier otro formato a JPEG de alta fidelidad
+                                    dest_ext = ".jpg"
+                                    media_type = "image/jpeg"
+                                    im_rgb = im.convert("RGB")
+                                    bio = io.BytesIO()
+                                    im_rgb.save(bio, format="JPEG", quality=90, optimize=True)
+                                    img_bytes = bio.getvalue()
+                        else:
+                            # Fallback si no está PIL
+                            suffix = img_disk_path.suffix.lower()
+                            if suffix == ".png":
+                                dest_ext = ".png"
+                                media_type = "image/png"
+                            elif suffix == ".gif":
+                                dest_ext = ".gif"
+                                media_type = "image/gif"
+                            else:
+                                dest_ext = ".jpg"
+                                media_type = "image/jpeg"
+                            img_bytes = img_disk_path.read_bytes()
+
+                        safe_stem = re.sub(r"[^a-zA-Z0-9_-]", "_", img_disk_path.stem)
+                        dest_fname = f"images/{safe_stem}{dest_ext}"
+                        img_id = f"img_{safe_stem}"
+
+                        # Asegurar ID único en el manifiesto
+                        c = 1
+                        base_id = img_id
+                        while any(f'id="{img_id}"' in m for m in manifest_items) or img_id in [v["id"] for v in embedded_images.values()]:
+                            img_id = f"{base_id}_{c}"
+                            c += 1
+
+                        embedded_images[src_url] = {
+                            "href": dest_fname,
+                            "media_type": media_type,
+                            "id": img_id,
+                        }
+                        manifest_items.append(f'<item id="{img_id}" href="{dest_fname}" media-type="{media_type}"/>')
+                        zf.writestr(f"OEBPS/{dest_fname}", img_bytes)
+                    except Exception as err:
+                        print(f"    [WARN] Error procesando imagen {src_url} para EPUB: {err}")
 
         for idx, ch in enumerate(chapters_data, start=1):
             fname = f"chapter_{idx:02d}.xhtml"
@@ -788,8 +876,12 @@ hr { border: 0; border-top: 1px solid #ccc; margin: 1.5em 0; }
                 elif btype == "img":
                     alt_text, src_url = bcontent
                     caption_html = f"<figcaption>{html.escape(alt_text)}</figcaption>" if alt_text else ""
+                    if src_url in embedded_images:
+                        epub_src = embedded_images[src_url]["href"]
+                    else:
+                        epub_src = html.escape(src_url)
                     body_elems.append(
-                        f'<figure class="chapter-figure"><img src="{html.escape(src_url)}" alt="{html.escape(alt_text)}"/>{caption_html}</figure>'
+                        f'<figure class="chapter-figure"><img src="{epub_src}" alt="{html.escape(alt_text)}"/>{caption_html}</figure>'
                     )
                 elif btype == "h2":
                     body_elems.append(f"<h2>{markdown_inline_to_xhtml(bcontent)}</h2>")
@@ -849,6 +941,7 @@ hr { border: 0; border-top: 1px solid #ccc; margin: 1.5em 0; }
     <dc:creator>{html.escape(author)}</dc:creator>
     <dc:language>{lang}</dc:language>
     <meta property="dcterms:modified">{now_iso}</meta>
+    <meta name="cover" content="cover-image"/>
   </metadata>
   <manifest>
     {"".join(manifest_items)}
