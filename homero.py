@@ -618,8 +618,13 @@ async def synthesize_and_align(
             tts_words = []
 
             async def _stream_to_file():
+                stream_it = communicate.stream().__aiter__()
                 with open(mp3_path, "wb") as audio_file:
-                    async for chunk in communicate.stream():
+                    while True:
+                        try:
+                            chunk = await asyncio.wait_for(stream_it.__anext__(), timeout=25.0)
+                        except StopAsyncIteration:
+                            break
                         if chunk["type"] == "audio":
                             audio_file.write(chunk["data"])
                         elif chunk["type"] == "WordBoundary":
@@ -633,7 +638,7 @@ async def synthesize_and_align(
                                 "end": end_sec,
                             })
 
-            await asyncio.wait_for(_stream_to_file(), timeout=90.0)
+            await _stream_to_file()
             if tts_words:
                 break
         except Exception as err:
