@@ -13,6 +13,7 @@ import io
 import json
 import os
 import re
+import time
 import urllib.parse
 import urllib.request
 import uuid
@@ -45,7 +46,7 @@ LANG_MAP = {
 
 
 def translate_text(text: str, sl: str = "es", tl: str = "en") -> str:
-    """Traduce texto plano preservando saltos de línea."""
+    """Traduce texto plano preservando saltos de línea con reintentos ante fallos transitorios de red."""
     if not text or not text.strip():
         return text
     target = LANG_MAP.get(tl, tl)
@@ -53,10 +54,19 @@ def translate_text(text: str, sl: str = "es", tl: str = "en") -> str:
     if source == target:
         return text
     url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl={source}&tl={target}&dt=t&q={urllib.parse.quote(text)}"
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
-    with urllib.request.urlopen(req, timeout=25) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-        return "".join([part[0] for part in data[0] if part[0]])
+    for attempt in range(4):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                return "".join([part[0] for part in data[0] if part[0]])
+        except Exception as err:
+            if attempt < 3:
+                time.sleep(1.5 * (attempt + 1))
+            else:
+                print(f"    [WARN] Fallo traduciendo fragmento ({sl}->{tl}): {err}")
+                return text
+    return text
 
 
 def translate_markdown_file(source_content: str, sl: str, tl: str) -> str:
@@ -156,6 +166,8 @@ def auto_translate_book(book_dir: Path, source_lang: str = "es"):
 
     for target_lang, linfo in idiomas_cfg.items():
         if target_lang == source_lang:
+            continue
+        if not linfo.get("activo", True):
             continue
 
         target_dir = book_dir / "capitulos" / target_lang
@@ -517,8 +529,9 @@ def compile_markdown_for_karaoke(
         elif btype == "img":
             alt_text, src_url = bcontent
             caption_html = f"<figcaption>{alt_text}</figcaption>" if alt_text else ""
+            fig_class = "chapter-figure is-qr" if "qr" in src_url.lower() else "chapter-figure"
             html_parts.append(
-                f'<figure class="chapter-figure"><img src="{src_url}" alt="{alt_text}" loading="lazy">{caption_html}</figure>'
+                f'<figure class="{fig_class}"><img src="{src_url}" alt="{alt_text}" loading="lazy">{caption_html}</figure>'
             )
             clean_blocks.append(("img", (alt_text, src_url)))
         elif btype == "h2":
@@ -750,6 +763,7 @@ h2 { font-size: 1.3em; margin-top: 1.6em; color: #1c1e21; }
 hr { border: 0; border-top: 1px solid #ccc; margin: 1.5em 0; }
 figure.chapter-figure { margin: 1.8em 0; text-align: center; page-break-inside: avoid; }
 figure.chapter-figure img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+figure.chapter-figure.is-qr img { max-width: 180px; }
 figcaption { font-size: 0.85em; font-style: italic; color: #555555; margin-top: 0.6em; text-align: center; }
 blockquote.chapter-letter { margin: 1.5em 5%; padding: 0.8em 1.2em; border-left: 3px solid #003399; background: #f8f9fa; font-style: italic; }
 a { color: #003399; text-decoration: underline; }
@@ -880,8 +894,9 @@ a { color: #003399; text-decoration: underline; }
                         epub_src = embedded_images[src_url]["href"]
                     else:
                         epub_src = html.escape(src_url)
+                    fig_class = "chapter-figure is-qr" if "qr" in src_url.lower() else "chapter-figure"
                     body_elems.append(
-                        f'<figure class="chapter-figure"><img src="{epub_src}" alt="{html.escape(alt_text)}"/>{caption_html}</figure>'
+                        f'<figure class="{fig_class}"><img src="{epub_src}" alt="{html.escape(alt_text)}"/>{caption_html}</figure>'
                     )
                 elif btype == "h2":
                     body_elems.append(f"<h2>{markdown_inline_to_xhtml(bcontent)}</h2>")
@@ -1044,19 +1059,22 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
         pdf.ln(5)
 
         pdf.set_text_color(28, 30, 33)
+        def clean_pdf_str(s: str) -> str:
+            return re.sub(r"[\U00010000-\U0010ffff]", "", s)
+
         for btype, bcontent in ch["clean_blocks"]:
             if btype == "hr":
                 pdf.ln(3)
             elif btype == "h2":
                 pdf.ln(4)
                 pdf.set_font("BookSerif", "B", 13)
-                pdf.multi_cell(0, 7.5, bcontent, markdown=True)
+                pdf.multi_cell(0, 7.5, clean_pdf_str(bcontent), markdown=True)
                 pdf.ln(2)
             elif btype in ("ol", "ul"):
                 pdf.set_font("BookSerif", "", 11)
                 for idx_li, it in enumerate(bcontent, start=1):
                     prefix = f"  {idx_li}. " if btype == "ol" else "  - "
-                    pdf.multi_cell(0, 6.8, f"{prefix}{it}", markdown=True)
+                    pdf.multi_cell(0, 6.8, clean_pdf_str(f"{prefix}{it}"), markdown=True)
                     pdf.ln(1.5)
                 pdf.ln(2)
             elif btype == "img":
@@ -1065,14 +1083,14 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
                 if img_path.exists():
                     try:
                         pdf.ln(3)
-                        img_w = 110
+                        img_w = 45 if "qr" in src_url.lower() else 110
                         x_pos = (pdf.w - img_w) / 2
                         pdf.image(str(img_path), x=x_pos, w=img_w)
                         pdf.ln(2)
                         if alt_text:
                             pdf.set_font("BookSerif", "", 9)
                             pdf.set_text_color(110, 115, 125)
-                            pdf.multi_cell(0, 5, alt_text, align="C")
+                            pdf.multi_cell(0, 5, clean_pdf_str(alt_text), align="C")
                             pdf.set_text_color(28, 30, 33)
                             pdf.set_font("BookSerif", "", 11)
                             pdf.ln(3)
@@ -1080,7 +1098,7 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
                         print(f"    [WARN] No se pudo incrustar imagen {src_url} en PDF: {e}")
             elif btype == "p":
                 pdf.set_font("BookSerif", "", 11)
-                pdf.multi_cell(0, 6.8, bcontent, markdown=True)
+                pdf.multi_cell(0, 6.8, clean_pdf_str(bcontent), markdown=True)
                 pdf.ln(3.5)
             elif btype == "blockquote":
                 pdf.ln(2)
@@ -1089,7 +1107,7 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
                 orig_l = pdf.l_margin
                 pdf.set_left_margin(orig_l + 8)
                 for qp in bcontent:
-                    pdf.multi_cell(0, 6.2, qp, markdown=True)
+                    pdf.multi_cell(0, 6.2, clean_pdf_str(qp), markdown=True)
                     pdf.ln(2)
                 pdf.set_left_margin(orig_l)
                 pdf.set_font("BookSerif", "", 11)
@@ -1178,9 +1196,15 @@ async def build_book(
                 force=force_tts,
             )
 
+            repo_url = book_cfg.get("libro", {}).get("repositorio_url", "https://github.com/elswork/odisea.deft.work").rstrip("/")
+            repo_branch = book_cfg.get("libro", {}).get("rama_edicion", "main")
+            edit_url = f"{repo_url}/edit/{repo_branch}/capitulos/{lang}/{md_file.name}"
+
             chapters_out.append({
                 "capitulo": ch_num,
                 "slug": slug,
+                "file": md_file.name,
+                "edit_url": edit_url,
                 "title": ch_title,
                 "title_html": title_html,
                 "subtitle": ch_subtitle,

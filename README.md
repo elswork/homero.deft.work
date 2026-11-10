@@ -1,101 +1,126 @@
-# Homero (`homero`)
+# 🏛️ Homero (`homero.deft.work`)
 
-> **Motor open-source de publicación editorial, audiolibro neuronal con «Karaoke a la inversa» (Read-Along) y exportación multiformato (Web, EPUB, PDF, MP3) sin salir de GitHub.**
+> **Tu editorial digital y de audiolibros en un solo comando.**  
+> Escribe tus capítulos en texto sencillo (Markdown) y **Homero** los traduce automáticamente, graba el audiolibro con voces neuronales naturales, crea el «Karaoke a la inversa» (*Read-Along* palabra por palabra) y maqueta el libro para **Web, Kindle (`.epub`) y `.pdf`**.
 
-Creado dentro del ecosistema de la Iniciativa Ciudadana Europea **`ECI(2026)000012`** (*Denominación de Origen `.ia`*), **Homero** separa por completo la **herramienta tecnológica** del **contenido literario** (como [*La Odisea del .ia*](https://odisea.deft.work)).
-
----
-
-## Características principales
-
-1. **Audiolibro automático sin salir de GitHub:**
-   - En cada `git push`, Homero convierte los capítulos escritos en Markdown (`.md`) en archivos de audio `.mp3` con voces neuronales naturales en múltiples idiomas (`es`, `en`, `fr`, `it`, `pt`, `el`, `ro`, `hu`).
-   - **Modo híbrido (Voz del autor):** Si el autor sube su propia grabación de voz (`audio/<idioma>/<capitulo>-autor.mp3`), Homero respeta la grabación humana y alinea el texto automáticamente.
-2. **«Karaoke a la inversa» (Sincronización Read-Along al milisegundo):**
-   - Mientras se reproduce el audiolibro, Homero ilumina suavemente la **frase activa** y resalta en tiempo real la **palabra exacta** que se está pronunciando.
-   - **Navegación interactiva por clic:** Hacer clic en cualquier frase del capítulo lleva el reproductor de audio instantáneamente a ese segundo exacto.
-3. **Exportación abierta a múltiples formatos:**
-   - Genera automáticamente el libro electrónico **`.epub`** (compatible con Kindle, Apple Books, Kobo) y el documento maquetado **`.pdf`**, además del audiolibro descargable **`.mp3`**.
-4. **Difusión en RRSS y Patrocinio Económico:**
-   - Botones integrados para compartir capítulos y citas en **X (Twitter), LinkedIn, WhatsApp, Telegram** o mediante el menú nativo del dispositivo.
-   - Bloque de mecenazgo/patrocinio económico configurable (`PayPal / Tarjeta`) y conversión directa hacia causas o iniciativas ciudadanas.
+Creado dentro del ecosistema de la Iniciativa Ciudadana Europea **`ECI(2026)000012`** (*Denominación de Origen `.IA`*) para impulsar obras vivas y abiertas como [**La Odisea de la .IA** (`odisea.deft.work`)](https://odisea.deft.work).
 
 ---
 
-## Estructura de un libro compatible con Homero
+## ⚡ Guía rápida en 3 pasos (Cómo usar la plataforma)
 
-Cualquier repositorio de libro (por ejemplo, `odisea.deft.work`) solo necesita mantener esta estructura limpia:
+No necesitas conocimientos complejos: **Homero** separa por completo el **motor técnico** (`homero.deft.work`) del **libro** (por ejemplo, `odisea.deft.work`).
 
-```text
-mi-libro/
-├── libro.yaml                  # Metadatos del libro, idiomas, voces y enlace de patrocinio (PayPal)
-├── capitulos/
-│   ├── es/
-│   │   └── 01-capitulo.md      # Texto del capítulo en Markdown limpio
-│   └── en/
-│       └── 01-chapter.md
-├── audio/                      # Generado por Homero (MP3 + JSON de sincronización karaoke)
-├── descargas/                  # Generado por Homero (EPUB + PDF por idioma)
-└── .github/workflows/
-    └── homero.yml              # GitHub Action que ejecuta Homero automáticamente al hacer push
+### Paso 1: Escribe tu capítulo en español
+Dentro de la carpeta `capitulos/es/` de tu libro, crea o edita un archivo `.md` (por ejemplo, `01-mi-capitulo.md`):
+
+```markdown
+---
+capitulo: 1
+titulo: "Título del capítulo"
+subtitulo: "Subtítulo opcional"
+fecha: "2026"
+tiempo_lectura: "5 min"
+---
+
+# Capítulo 1: Título del capítulo
+
+Escribe aquí tu historia con formato Markdown normal (negritas, citas, imágenes...).
+```
+
+### Paso 2: Traduce y compila todo con 1 solo comando
+Ejecuta Homero indicando dónde está la carpeta de tu libro. Homero detectará únicamente lo que haya cambiado (usando su caché inteligente) para terminar en segundos:
+
+```bash
+/home/pirate/docker/homero.deft.work/.venv/bin/python3 /home/pirate/docker/homero.deft.work/homero.py build --book-dir /home/pirate/docker/odisea.deft.work --translate
+```
+
+### Paso 3: Sube los cambios a GitHub (`git push`)
+Entra en la carpeta de tu libro y publica:
+
+```bash
+cd /home/pirate/docker/odisea.deft.work
+git add .
+git commit -m "feat: actualizar capítulos y audiolibros"
+git push
+```
+
+¡Listo! GitHub Pages actualizará tu web automáticamente.
+
+---
+
+## 🛠️ Tabla de comandos rápidos
+
+| Qué quieres hacer | Comando directo (Python) | Comando equivalente (Docker) |
+| :--- | :--- | :--- |
+| **Todo en uno** *(Traducir + Audiolibros + EPUB + PDF + Web)* | `python3 homero.py build --book-dir /ruta/libro --translate` | `docker run --rm -v /ruta/libro:/book homero:latest build --translate` |
+| **Solo compilar** *(sin volver a traducir)* | `python3 homero.py build --book-dir /ruta/libro` | `docker run --rm -v /ruta/libro:/book homero:latest build` |
+| **Solo traducir** *(del español al resto de idiomas)* | `python3 homero.py translate --book-dir /ruta/libro` | `docker run --rm -v /ruta/libro:/book homero:latest translate` |
+| **Regenerar todas las voces desde cero** | `python3 homero.py build --book-dir /ruta/libro --force-tts` | `docker run --rm -v /ruta/libro:/book homero:latest build --force-tts` |
+
+---
+
+## ✨ ¿Qué genera Homero automáticamente por ti?
+
+1. **🌍 Traducción automática con caché inteligente (`capitulos/<idioma>/`):**
+   - Traduce tus capítulos desde el idioma original (`es`) a todos los idiomas activos en `libro.yaml` (`en`, `fr`, `de`, `it`, `pt`, `el`, `hu`, `hr`, `zh`...), respetando los títulos, enlaces e ilustraciones.
+   - Si no has cambiado un capítulo en español, no lo vuelve a traducir.
+2. **🎧 Audiolibro neuronal + «Karaoke a la inversa» (`audio/<idioma>/`):**
+   - Genera un archivo `.mp3` por capítulo con voces neuronales naturales (`edge-tts`) o respeta tu propia voz grabada si subes `audio/<idioma>/<capitulo>-autor.mp3`.
+   - Crea un archivo `.sync.json` con el milisegundo exacto de cada frase y palabra para que el lector web ilumine el texto en vivo mientras suena el audio y permita saltar a cualquier frase haciendo clic.
+3. **📚 Ebook `.epub` compatible con Amazon Kindle y Apple Books (`descargas/`):**
+   - Empaqueta portada e ilustraciones interiores convirtiendo automáticamente imágenes `.webp` o `.png` a JPEG estándar dentro del manifiesto OPF para que se vean en todos los modelos de Kindle.
+4. **📄 Libro maquetado en `.pdf` (`descargas/`):**
+   - Genera el PDF completo con portada, índice, ilustraciones centradas, códigos QR ajustados y soporte tipográfico multilingüe (alfabeto latino, griego y chino).
+5. **✏️ Enlaces de edición colaborativa en GitHub (`homero-bundle.js`):**
+   - Conecta cada capítulo con su archivo fuente en GitHub (`repositorio_url` y `rama_edicion` en `libro.yaml`) para que cualquier lector pueda pulsar **«✏️ Editar en GitHub»** y proponer mejoras en 3 clics.
+
+---
+
+## ⚙️ Configuración de `libro.yaml` (Ejemplo)
+
+En la raíz de tu libro, el archivo `libro.yaml` controla todos los detalles de forma clara:
+
+```yaml
+id: "odisea-ia"
+titulo: "La Odisea de la .IA"
+subtitulo: "Un informático en el laberinto de Bruselas"
+autor: "Eloy López"
+url: "https://odisea.deft.work"
+portada: "img/portada.jpg"
+
+# Repositorio de GitHub para los botones "✏️ Editar en GitHub" de cada capítulo
+repositorio_url: "https://github.com/elswork/odisea.deft.work"
+rama_edicion: "main"
+
+idioma_defecto: "es"
+idiomas:
+  es:
+    nombre: "Español"
+    bandera: "🇪🇸"
+    voz_tts: "es-ES-AlvaroNeural"
+    activo: true
+  en:
+    nombre: "English"
+    bandera: "🇬🇧"
+    voz_tts: "en-US-ChristopherNeural"
+    activo: true
 ```
 
 ---
 
-## Uso y Ejecución Local
+## 📦 Instalación inicial (solo la primera vez)
 
-Habiendo descartado la ejecución pesada en runners de GitHub Actions, Homero está diseñado para ejecutarse cómodamente en local antes de hacer `git push`. Puedes usar **Python nativo** o **Docker**.
-
-### 1. Opción A: Con Python (Recomendada si tienes Python 3.10+)
-
+### Opción A: Con Python 3.10+
 ```bash
-# 1. Situarse en la carpeta de Homero e instalar dependencias (solo la primera vez)
 cd /home/pirate/docker/homero.deft.work
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-
-# 2. Solo traducir los capítulos desde el español a los demás idiomas configurados
-python3 homero.py translate --book-dir /home/pirate/docker/odisea.deft.work
-
-# 3. Compilar el libro (genera audiolibros MP3, sincronización Karaoke, EPUB, PDF y bundle web)
-python3 homero.py build --book-dir /home/pirate/docker/odisea.deft.work
-
-# 4. Traducir y compilar todo en un único comando
-python3 homero.py build --book-dir /home/pirate/docker/odisea.deft.work --translate
-
-# 5. Forzar regeneración completa de audios (incluso si no ha cambiado el texto)
-python3 homero.py build --book-dir /home/pirate/docker/odisea.deft.work --force-tts
 ```
 
----
-
-### 2. Opción B: Con Docker (Sin instalar dependencias en tu máquina)
-
-Si prefieres no gestionar entornos de Python o fuentes del sistema (CJK, árabe, devanagari):
-
+### Opción B: Con Docker
 ```bash
-# 1. Construir la imagen Docker de Homero (solo la primera vez o si modificas homero.py)
 cd /home/pirate/docker/homero.deft.work
 docker build -t homero:latest .
-
-# 2. Solo traducir los capítulos
-docker run --rm -v /home/pirate/docker/odisea.deft.work:/book homero:latest translate
-
-# 3. Compilar el libro (audiolibros, karaoke, epub, pdf y web)
-docker run --rm -v /home/pirate/docker/odisea.deft.work:/book homero:latest build
-
-# 4. Traducir y compilar todo de una vez
-docker run --rm -v /home/pirate/docker/odisea.deft.work:/book homero:latest build --translate
 ```
-
----
-
-## ¿Cómo funciona el flujo de trabajo?
-
-1. **Escribes tu capítulo en español:** Creas o editas `capitulos/es/02-nombre-capitulo.md`.
-2. **Generas la traducción:** Ejecutas `python3 homero.py translate` (o con `--translate` al hacer build). Homero detecta los capítulos nuevos o modificados, traduce el texto respetando los formatos Markdown y crea los archivos correspondientes en los idiomas activados en `libro.yaml` (ej. `capitulos/en/...`).
-3. **Generas el audiolibro y karaoke:** Homero invoca el motor neuronal de Edge-TTS con la voz configurada para cada idioma en `libro.yaml`, calcula la marca de tiempo exacta de cada palabra, genera el audio `.mp3` y el archivo `.sync.json` para el karaoke interactivo.
-4. **Exportas formatos:** Se generan automáticamente las versiones `.epub` y `.pdf` en la carpeta `descargas/` y se actualiza `homero-bundle.js`.
-5. **Publicas:** Solo haces `git commit` y `git push` en el repositorio del libro. GitHub Pages actualizará la web instantáneamente en unos segundos.
-
