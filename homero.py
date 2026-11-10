@@ -607,7 +607,7 @@ async def synthesize_and_align(
     print(f"  [TTS] Generando audiolibro y marcas de tiempo ({voice}) -> {mp3_path.name}...")
     tts_words = []
     active_voice = voice
-    for attempt in range(2):
+    for attempt in range(3):
         try:
             communicate = edge_tts.Communicate(
                 spoken_text,
@@ -616,24 +616,30 @@ async def synthesize_and_align(
                 boundary="WordBoundary",
             )
             tts_words = []
-            with open(mp3_path, "wb") as audio_file:
-                async for chunk in communicate.stream():
-                    if chunk["type"] == "audio":
-                        audio_file.write(chunk["data"])
-                    elif chunk["type"] == "WordBoundary":
-                        start_sec = round(chunk["offset"] / 10_000_000.0, 3)
-                        dur_sec = round(chunk["duration"] / 10_000_000.0, 3)
-                        end_sec = round(start_sec + max(dur_sec, 0.08), 3)
-                        tts_words.append({
-                            "text": chunk["text"],
-                            "norm": normalize_word(chunk["text"]),
-                            "start": start_sec,
-                            "end": end_sec,
-                        })
+
+            async def _stream_to_file():
+                with open(mp3_path, "wb") as audio_file:
+                    async for chunk in communicate.stream():
+                        if chunk["type"] == "audio":
+                            audio_file.write(chunk["data"])
+                        elif chunk["type"] == "WordBoundary":
+                            start_sec = round(chunk["offset"] / 10_000_000.0, 3)
+                            dur_sec = round(chunk["duration"] / 10_000_000.0, 3)
+                            end_sec = round(start_sec + max(dur_sec, 0.08), 3)
+                            tts_words.append({
+                                "text": chunk["text"],
+                                "norm": normalize_word(chunk["text"]),
+                                "start": start_sec,
+                                "end": end_sec,
+                            })
+
+            await asyncio.wait_for(_stream_to_file(), timeout=90.0)
             if tts_words:
                 break
         except Exception as err:
             if attempt == 0:
+                print(f"  [AVISO TTS] Reintentando {active_voice} tras pausa/error ({err})...")
+            elif attempt == 1:
                 fallback_voice = "ru-RU-SvetlanaNeural" if "ru-RU" in active_voice else "en-US-AriaNeural"
                 print(f"  [AVISO TTS] Falló voz {active_voice} ({err}). Reintentando con voz alternativa {fallback_voice}...")
                 active_voice = fallback_voice
