@@ -1041,10 +1041,11 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
         pdf.set_font("Helvetica", "", 11)
 
     cover_rel = book_cfg.get("libro", {}).get("portada")
-    if cover_rel and Path(cover_rel).exists():
+    cover_path = (out_path.parent.parent / cover_rel).resolve() if (cover_rel and not os.path.isabs(cover_rel)) else (Path(cover_rel) if cover_rel else None)
+    if cover_path and cover_path.exists():
         pdf.add_page()
         # Portada completa a sangre (210 x 297 mm en A4)
-        pdf.image(str(cover_rel), x=0, y=0, w=210, h=297)
+        pdf.image(str(cover_path), x=0, y=0, w=210, h=297)
 
     for ch in chapters_data:
         pdf.add_page()
