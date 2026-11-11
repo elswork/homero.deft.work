@@ -378,11 +378,17 @@ def compile_markdown_for_karaoke(
             heading_text = re.sub(r"^#{2,3}\s+", "", line).strip()
             blocks.append(("h2", heading_text))
             continue
-        m_img = re.match(r"^!\[(.*?)\]\((.*?)\)$", line)
+        m_link_img = re.match(r"^\[!\[(.*?)\]\((.*?)\)\]\((.*?)\)\s*$", line)
+        if m_link_img:
+            flush_para()
+            flush_list()
+            blocks.append(("img", (m_link_img.group(1).strip(), m_link_img.group(2).strip(), m_link_img.group(3).strip())))
+            continue
+        m_img = re.match(r"^!\[(.*?)\]\((.*?)\)\s*$", line)
         if m_img:
             flush_para()
             flush_list()
-            blocks.append(("img", (m_img.group(1).strip(), m_img.group(2).strip())))
+            blocks.append(("img", (m_img.group(1).strip(), m_img.group(2).strip(), None)))
             continue
         m_ol = re.match(r"^\d+\.\s+(.*)$", line)
         if m_ol:
@@ -527,13 +533,19 @@ def compile_markdown_for_karaoke(
             html_parts.append('<hr class="chapter-divider">')
             clean_blocks.append(("hr", ""))
         elif btype == "img":
-            alt_text, src_url = bcontent
+            alt_text = bcontent[0]
+            src_url = bcontent[1]
+            href_url = bcontent[2] if len(bcontent) > 2 else None
             caption_html = f"<figcaption>{alt_text}</figcaption>" if alt_text else ""
-            fig_class = "chapter-figure is-qr" if "qr" in src_url.lower() else "chapter-figure"
+            fig_class = "chapter-figure is-qr" if ("qr" in src_url.lower() or "etiqueta" in src_url.lower()) else "chapter-figure"
+            if href_url:
+                img_tag = f'<a href="{href_url}" target="_blank" rel="noopener noreferrer"><img src="{src_url}" alt="{alt_text}" loading="lazy"></a>'
+            else:
+                img_tag = f'<img src="{src_url}" alt="{alt_text}" loading="lazy">'
             html_parts.append(
-                f'<figure class="{fig_class}"><img src="{src_url}" alt="{alt_text}" loading="lazy">{caption_html}</figure>'
+                f'<figure class="{fig_class}">{img_tag}{caption_html}</figure>'
             )
-            clean_blocks.append(("img", (alt_text, src_url)))
+            clean_blocks.append(("img", (alt_text, src_url, href_url)))
         elif btype == "h2":
             s_html = register_sentence(bcontent)
             html_parts.append(f"<h2>{s_html}</h2>")
@@ -818,7 +830,7 @@ a { color: #003399; text-decoration: underline; }
         for ch in chapters_data:
             for btype, bcontent in ch.get("clean_blocks", []):
                 if btype == "img":
-                    alt_text, src_url = bcontent
+                    src_url = bcontent[1]
                     if src_url in embedded_images:
                         continue
                     img_disk_path = (book_dir / src_url).resolve() if not os.path.isabs(src_url) else Path(src_url)
@@ -899,15 +911,21 @@ a { color: #003399; text-decoration: underline; }
                 if btype == "hr":
                     body_elems.append("<hr/>")
                 elif btype == "img":
-                    alt_text, src_url = bcontent
+                    alt_text = bcontent[0]
+                    src_url = bcontent[1]
+                    href_url = bcontent[2] if len(bcontent) > 2 else None
                     caption_html = f"<figcaption>{html.escape(alt_text)}</figcaption>" if alt_text else ""
                     if src_url in embedded_images:
                         epub_src = embedded_images[src_url]["href"]
                     else:
                         epub_src = html.escape(src_url)
-                    fig_class = "chapter-figure is-qr" if "qr" in src_url.lower() else "chapter-figure"
+                    fig_class = "chapter-figure is-qr" if ("qr" in src_url.lower() or "etiqueta" in src_url.lower()) else "chapter-figure"
+                    if href_url:
+                        img_tag = f'<a href="{href_url}"><img src="{epub_src}" alt="{html.escape(alt_text)}"/></a>'
+                    else:
+                        img_tag = f'<img src="{epub_src}" alt="{html.escape(alt_text)}"/>'
                     body_elems.append(
-                        f'<figure class="{fig_class}"><img src="{epub_src}" alt="{html.escape(alt_text)}"/>{caption_html}</figure>'
+                        f'<figure class="{fig_class}">{img_tag}{caption_html}</figure>'
                     )
                 elif btype == "h2":
                     body_elems.append(f"<h2>{markdown_inline_to_xhtml(bcontent)}</h2>")
@@ -1090,14 +1108,20 @@ def generate_pdf(book_cfg: dict, lang: str, chapters_data: list, out_path: Path)
                     pdf.ln(1.5)
                 pdf.ln(2)
             elif btype == "img":
-                alt_text, src_url = bcontent
+                alt_text = bcontent[0]
+                src_url = bcontent[1]
+                href_url = bcontent[2] if len(bcontent) > 2 else None
                 img_path = (out_path.parent.parent / src_url).resolve() if not os.path.isabs(src_url) else Path(src_url)
                 if img_path.exists():
                     try:
                         pdf.ln(3)
-                        img_w = 45 if "qr" in src_url.lower() else 110
+                        is_compact = "qr" in src_url.lower() or "etiqueta" in src_url.lower()
+                        img_w = 48 if is_compact else 110
                         x_pos = (pdf.w - img_w) / 2
-                        pdf.image(str(img_path), x=x_pos, w=img_w)
+                        if href_url:
+                            pdf.image(str(img_path), x=x_pos, w=img_w, link=href_url)
+                        else:
+                            pdf.image(str(img_path), x=x_pos, w=img_w)
                         pdf.ln(2)
                         if alt_text:
                             pdf.set_font("BookSerif", "", 9)
