@@ -106,7 +106,10 @@ def translate_markdown_file(source_content: str, sl: str, tl: str) -> str:
         p_strip = p.strip()
         if not p_strip:
             continue
-        if p_strip.startswith("## "):
+        if p_strip.startswith("# "):
+            h_text = p_strip[2:].strip()
+            tr_paras.append(f"# {translate_text(h_text, sl, tl)}")
+        elif p_strip.startswith("## "):
             h_text = p_strip[3:].strip()
             tr_paras.append(f"## {translate_text(h_text, sl, tl)}")
         elif p_strip.startswith("### "):
@@ -117,8 +120,15 @@ def translate_markdown_file(source_content: str, sl: str, tl: str) -> str:
             tr_paras.append(f"> {translate_text(q_text, sl, tl)}")
         elif p_strip.startswith("---") or p_strip.startswith("***"):
             tr_paras.append(p_strip)
+        elif p_strip.startswith("[!["):
+            m = re.match(r"^\[!\[(.*?)\]\((.*?)\)\]\((.*?)\)\s*$", p_strip)
+            if m:
+                alt = translate_text(m.group(1), sl, tl)
+                tr_paras.append(f"[![{alt}]({m.group(2)})]({m.group(3)})")
+            else:
+                tr_paras.append(p_strip)
         elif p_strip.startswith("!["):
-            m = re.match(r"^!\[(.*?)\]\((.*?)\)$", p_strip)
+            m = re.match(r"^!\[(.*?)\]\((.*?)\)\s*$", p_strip)
             if m:
                 alt = translate_text(m.group(1), sl, tl)
                 tr_paras.append(f"![{alt}]({m.group(2)})")
