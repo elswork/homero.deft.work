@@ -1310,6 +1310,14 @@ def main():
     t_parser.add_argument("--book-dir", default=".", help="Ruta al directorio del libro")
     t_parser.add_argument("--source-lang", default="es", help="Idioma maestro fuente (por defecto: es)")
 
+    # Comando video (Videolibro MP4 con Karaoke)
+    v_parser = sub.add_parser("video", help="Renderiza un capítulo como videolibro MP4 con karaoke, intro de portada y outro con QR")
+    v_parser.add_argument("--book-dir", default=".", help="Ruta al directorio del libro")
+    v_parser.add_argument("--chapter", type=int, default=0, help="Número de capítulo (por defecto: 0)")
+    v_parser.add_argument("--lang", default="es", help="Idioma (por defecto: es)")
+    v_parser.add_argument("--output", default=None, help="Ruta de salida del archivo .mp4")
+    v_parser.add_argument("--all", action="store_true", help="Generar vídeos para todos los capítulos")
+
     args = parser.parse_args()
     if args.cmd == "build":
         asyncio.run(build_book(
@@ -1320,6 +1328,19 @@ def main():
         ))
     elif args.cmd == "translate":
         auto_translate_book(Path(args.book_dir).resolve(), source_lang=args.source_lang)
+    elif args.cmd == "video":
+        from tools.generate_videobook import render_chapter_video
+        b_dir = Path(args.book_dir).resolve()
+        if args.all:
+            bundle_path = b_dir / "homero-bundle.js"
+            text = bundle_path.read_text(encoding="utf-8").strip()[len("window.HOMERO_BOOK = "):-1]
+            data = json.loads(text)
+            total = len(data["idiomas"][args.lang]["chapters"])
+            for idx in range(total):
+                render_chapter_video(b_dir, chapter_idx=idx, lang=args.lang)
+        else:
+            out = Path(args.output).resolve() if args.output else None
+            render_chapter_video(b_dir, chapter_idx=args.chapter, lang=args.lang, output_mp4=out)
     else:
         parser.print_help()
 
